@@ -133,6 +133,7 @@ about half their original size.
     Entries:    1000000
     Raw Size:   110.6 MB (estimated)
     File Size:  62.9 MB (estimated)
+    
 
 ## Write performance
 
