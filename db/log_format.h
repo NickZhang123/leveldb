@@ -15,12 +15,12 @@ enum RecordType {
   // Zero is reserved for preallocated files
   kZeroType = 0,
 
-  kFullType = 1,
+  kFullType = 1, // 一个block就够了，小于32k数据
 
   // For fragments
-  kFirstType = 2,
-  kMiddleType = 3,
-  kLastType = 4
+  kFirstType = 2,  // 第一个block
+  kMiddleType = 3,  // 中间block
+  kLastType = 4    // 最后block
 };
 static const int kMaxRecordType = kLastType;
 

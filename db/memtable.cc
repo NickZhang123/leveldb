@@ -102,7 +102,7 @@ void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
 bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
   Slice memkey = key.memtable_key();
   Table::Iterator iter(&table_);
-  iter.Seek(memkey.data());
+  iter.Seek(memkey.data()); // memkey： key_len + key_data + seq + type
   if (iter.Valid()) {
     // entry format is:
     //    klength  varint32
@@ -116,14 +116,14 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
     const char* entry = iter.key();
     uint32_t key_length;
     const char* key_ptr = GetVarint32Ptr(entry, entry + 5, &key_length);
-    if (comparator_.comparator.user_comparator()->Compare(
-            Slice(key_ptr, key_length - 8), key.user_key()) == 0) {
+    if (comparator_.comparator.user_comparator()->Compare(          // 最后比较的是user key, comparator_实参类型是KeyComparator
+            Slice(key_ptr, key_length - 8), key.user_key()) == 0) {  // key_length表示后面的数据长度，后面数据为uer_key + seq + type, seq+type为8个字节，因此-8, 内部key比较
       // Correct user key
-      const uint64_t tag = DecodeFixed64(key_ptr + key_length - 8);
+      const uint64_t tag = DecodeFixed64(key_ptr + key_length - 8); // 偏移到中间tag的指针
       switch (static_cast<ValueType>(tag & 0xff)) {
         case kTypeValue: {
-          Slice v = GetLengthPrefixedSlice(key_ptr + key_length);
-          value->assign(v.data(), v.size());
+          Slice v = GetLengthPrefixedSlice(key_ptr + key_length); // 偏移到value的指针
+          value->assign(v.data(), v.size());  // 获取value
           return true;
         }
         case kTypeDeletion:

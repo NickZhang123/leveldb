@@ -19,7 +19,7 @@ FilterBlockBuilder::FilterBlockBuilder(const FilterPolicy* policy)
     : policy_(policy) {}
 
 void FilterBlockBuilder::StartBlock(uint64_t block_offset) {
-  uint64_t filter_index = (block_offset / kFilterBase);
+  uint64_t filter_index = (block_offset / kFilterBase);  // 2k一个bloom过滤器
   assert(filter_index >= filter_offsets_.size());
   while (filter_index > filter_offsets_.size()) {
     GenerateFilter();
@@ -28,8 +28,8 @@ void FilterBlockBuilder::StartBlock(uint64_t block_offset) {
 
 void FilterBlockBuilder::AddKey(const Slice& key) {
   Slice k = key;
-  start_.push_back(keys_.size());
-  keys_.append(k.data(), k.size());
+  start_.push_back(keys_.size());   // start_保存每个key的长度
+  keys_.append(k.data(), k.size()); // keys_保存key
 }
 
 Slice FilterBlockBuilder::Finish() {
@@ -48,8 +48,9 @@ Slice FilterBlockBuilder::Finish() {
   return Slice(result_);
 }
 
+// start_: 每个kv的长度 + kv data总长度
 void FilterBlockBuilder::GenerateFilter() {
-  const size_t num_keys = start_.size();
+  const size_t num_keys = start_.size(); // kv数量
   if (num_keys == 0) {
     // Fast path if there are no keys for this filter
     filter_offsets_.push_back(result_.size());
@@ -57,7 +58,7 @@ void FilterBlockBuilder::GenerateFilter() {
   }
 
   // Make list of keys from flattened key structure
-  start_.push_back(keys_.size());  // Simplify length computation
+  start_.push_back(keys_.size());  // Simplify length computation  // keys_保存的真是kv数据
   tmp_keys_.resize(num_keys);
   for (size_t i = 0; i < num_keys; i++) {
     const char* base = keys_.data() + start_[i];

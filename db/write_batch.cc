@@ -120,7 +120,7 @@ class MemTableInserter : public WriteBatch::Handler {
 
   void Put(const Slice& key, const Slice& value) override {
     mem_->Add(sequence_, kTypeValue, key, value);
-    sequence_++;
+    sequence_++; // 每put一个，增加一个seq号
   }
   void Delete(const Slice& key) override {
     mem_->Add(sequence_, kTypeDeletion, key, Slice());
@@ -131,9 +131,9 @@ class MemTableInserter : public WriteBatch::Handler {
 
 Status WriteBatchInternal::InsertInto(const WriteBatch* b, MemTable* memtable) {
   MemTableInserter inserter;
-  inserter.sequence_ = WriteBatchInternal::Sequence(b);
+  inserter.sequence_ = WriteBatchInternal::Sequence(b);  // 这批put的首个seq
   inserter.mem_ = memtable;
-  return b->Iterate(&inserter);
+  return b->Iterate(&inserter);  // 调用inserter的put、delete函数
 }
 
 void WriteBatchInternal::SetContents(WriteBatch* b, const Slice& contents) {
@@ -144,7 +144,7 @@ void WriteBatchInternal::SetContents(WriteBatch* b, const Slice& contents) {
 void WriteBatchInternal::Append(WriteBatch* dst, const WriteBatch* src) {
   SetCount(dst, Count(dst) + Count(src));
   assert(src->rep_.size() >= kHeader);
-  dst->rep_.append(src->rep_.data() + kHeader, src->rep_.size() - kHeader);
+  dst->rep_.append(src->rep_.data() + kHeader, src->rep_.size() - kHeader); // kHeader为8字节seq，4字节count
 }
 
 }  // namespace leveldb

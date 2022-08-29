@@ -18,7 +18,7 @@ Arena::~Arena() {
 }
 
 char* Arena::AllocateFallback(size_t bytes) {
-  if (bytes > kBlockSize / 4) {
+  if (bytes > kBlockSize / 4) {  // 如果每次分配大于1k，则按照所需内存分配，否则分配4k大小
     // Object is more than a quarter of our block size.  Allocate it separately
     // to avoid wasting too much space in leftover bytes.
     char* result = AllocateNewBlock(bytes);

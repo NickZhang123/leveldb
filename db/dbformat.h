@@ -137,7 +137,7 @@ class InternalKey {
 
  public:
   InternalKey() {}  // Leave rep_ as empty to indicate it is invalid
-  InternalKey(const Slice& user_key, SequenceNumber s, ValueType t) {
+  InternalKey(const Slice& user_key, SequenceNumber s, ValueType t) {   //  seq is uint64_t
     AppendInternalKey(&rep_, ParsedInternalKey(user_key, s, t));
   }
 
@@ -193,10 +193,10 @@ class LookupKey {
   ~LookupKey();
 
   // Return a key suitable for lookup in a MemTable.
-  Slice memtable_key() const { return Slice(start_, end_ - start_); }
+  Slice memtable_key() const { return Slice(start_, end_ - start_); }  // 长度 + user_key + seq + type
 
   // Return an internal key (suitable for passing to an internal iterator)
-  Slice internal_key() const { return Slice(kstart_, end_ - kstart_); }
+  Slice internal_key() const { return Slice(kstart_, end_ - kstart_); }  // user_key + seq + type
 
   // Return the user key
   Slice user_key() const { return Slice(kstart_, end_ - kstart_ - 8); }
