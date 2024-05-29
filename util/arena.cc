@@ -18,6 +18,7 @@ Arena::~Arena() {
 }
 
 char* Arena::AllocateFallback(size_t bytes) {
+  // 如果分配大于1k，则按需分配，小于1k，则分配一个整块4k
   if (bytes > kBlockSize / 4) {
     // Object is more than a quarter of our block size.  Allocate it separately
     // to avoid wasting too much space in leftover bytes.
@@ -35,10 +36,12 @@ char* Arena::AllocateFallback(size_t bytes) {
   return result;
 }
 
+// 将其实位置按照8字节对齐后开始分配bytes个字节
 char* Arena::AllocateAligned(size_t bytes) {
   const int align = (sizeof(void*) > 8) ? sizeof(void*) : 8;
   static_assert((align & (align - 1)) == 0,
                 "Pointer size should be a power of 2");
+
   size_t current_mod = reinterpret_cast<uintptr_t>(alloc_ptr_) & (align - 1);
   size_t slop = (current_mod == 0 ? 0 : align - current_mod);
   size_t needed = bytes + slop;
@@ -55,6 +58,7 @@ char* Arena::AllocateAligned(size_t bytes) {
   return result;
 }
 
+// 分配新空间，并交由block数组管理
 char* Arena::AllocateNewBlock(size_t block_bytes) {
   char* result = new char[block_bytes];
   blocks_.push_back(result);

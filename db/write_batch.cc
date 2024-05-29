@@ -39,18 +39,21 @@ void WriteBatch::Clear() {
 
 size_t WriteBatch::ApproximateSize() const { return rep_.size(); }
 
+// 遍历WriteBatch中的rep_, 写入handler中
 Status WriteBatch::Iterate(Handler* handler) const {
   Slice input(rep_);
   if (input.size() < kHeader) {
     return Status::Corruption("malformed WriteBatch (too small)");
   }
 
+  // 移除header
   input.remove_prefix(kHeader);
   Slice key, value;
   int found = 0;
   while (!input.empty()) {
     found++;
-    char tag = input[0];
+    // type+var_key_len + key + var_val_len+val
+    char tag = input[0]; 
     input.remove_prefix(1);
     switch (tag) {
       case kTypeValue:
@@ -72,6 +75,8 @@ Status WriteBatch::Iterate(Handler* handler) const {
         return Status::Corruption("unknown WriteBatch tag");
     }
   }
+
+  // 校验解码后数量和头部count是否一致
   if (found != WriteBatchInternal::Count(this)) {
     return Status::Corruption("WriteBatch has wrong count");
   } else {
@@ -79,10 +84,12 @@ Status WriteBatch::Iterate(Handler* handler) const {
   }
 }
 
+// 从rep_字符串第八个字节中提取count
 int WriteBatchInternal::Count(const WriteBatch* b) {
   return DecodeFixed32(b->rep_.data() + 8);
 }
 
+// 设置rep_字符串第八个字节的count
 void WriteBatchInternal::SetCount(WriteBatch* b, int n) {
   EncodeFixed32(&b->rep_[8], n);
 }
@@ -91,10 +98,12 @@ SequenceNumber WriteBatchInternal::Sequence(const WriteBatch* b) {
   return SequenceNumber(DecodeFixed64(b->rep_.data()));
 }
 
+// 前面八个字节是系统seq
 void WriteBatchInternal::SetSequence(WriteBatch* b, SequenceNumber seq) {
   EncodeFixed64(&b->rep_[0], seq);
 }
 
+// 格式：type(put) + var_key_len + key + var_val_len + val
 void WriteBatch::Put(const Slice& key, const Slice& value) {
   WriteBatchInternal::SetCount(this, WriteBatchInternal::Count(this) + 1);
   rep_.push_back(static_cast<char>(kTypeValue));
@@ -102,16 +111,19 @@ void WriteBatch::Put(const Slice& key, const Slice& value) {
   PutLengthPrefixedSlice(&rep_, value);
 }
 
+// 格式为 type(del) + var_key_len + key
 void WriteBatch::Delete(const Slice& key) {
   WriteBatchInternal::SetCount(this, WriteBatchInternal::Count(this) + 1);
   rep_.push_back(static_cast<char>(kTypeDeletion));
   PutLengthPrefixedSlice(&rep_, key);
 }
 
+// writebatch合并，count合并，rep_内容合并
 void WriteBatch::Append(const WriteBatch& source) {
   WriteBatchInternal::Append(this, &source);
 }
 
+// MemTableInserter用于将writebatch中的内容写入memtable
 namespace {
 class MemTableInserter : public WriteBatch::Handler {
  public:
@@ -129,6 +141,8 @@ class MemTableInserter : public WriteBatch::Handler {
 };
 }  // namespace
 
+
+// 构建MemTableInsert对象将WriteBatch中的数据写入Memtable
 Status WriteBatchInternal::InsertInto(const WriteBatch* b, MemTable* memtable) {
   MemTableInserter inserter;
   inserter.sequence_ = WriteBatchInternal::Sequence(b);
@@ -141,6 +155,7 @@ void WriteBatchInternal::SetContents(WriteBatch* b, const Slice& contents) {
   b->rep_.assign(contents.data(), contents.size());
 }
 
+// writebatch合并，count合并，rep_内容合并
 void WriteBatchInternal::Append(WriteBatch* dst, const WriteBatch* src) {
   SetCount(dst, Count(dst) + Count(src));
   assert(src->rep_.size() >= kHeader);

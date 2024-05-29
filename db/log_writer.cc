@@ -41,8 +41,10 @@ Status Writer::AddRecord(const Slice& slice) {
   Status s;
   bool begin = true;
   do {
-    const int leftover = kBlockSize - block_offset_;
+    const int leftover = kBlockSize - block_offset_;  // kBlockSize = 32k, 
     assert(leftover >= 0);
+
+    // 日志block大小为32k，如果剩下block大小不满足一条记录的header，则换一个block
     if (leftover < kHeaderSize) {
       // Switch to a new block
       if (leftover > 0) {
@@ -56,29 +58,36 @@ Status Writer::AddRecord(const Slice& slice) {
     // Invariant: we never leave < kHeaderSize bytes in a block.
     assert(kBlockSize - block_offset_ - kHeaderSize >= 0);
 
+    // left为记录剩余长度，avail为block剩余长度
     const size_t avail = kBlockSize - block_offset_ - kHeaderSize;
     const size_t fragment_length = (left < avail) ? left : avail;
 
+    // 计算trunk类型
     RecordType type;
-    const bool end = (left == fragment_length);
+    const bool end = (left == fragment_length);  // 如果当前block能够容纳记录，则end为true，当前记录类型为full
     if (begin && end) {
       type = kFullType;
     } else if (begin) {
-      type = kFirstType;
+      type = kFirstType;    // 记录第一个trunk类型
     } else if (end) {
-      type = kLastType;
+      type = kLastType;     // 记录最后一个trunk类型
     } else {
-      type = kMiddleType;
+      type = kMiddleType;   // 记录中间类型
     }
 
     s = EmitPhysicalRecord(type, ptr, fragment_length);
-    ptr += fragment_length;
-    left -= fragment_length;
+
+    ptr += fragment_length;   // 要写入的记录位置
+    left -= fragment_length;  // 剩下记录内容
     begin = false;
   } while (s.ok() && left > 0);
+  
   return s;
 }
 
+// header: crc(4) + len(2) + type(1)
+// 先写header，再写val（type + var_key_len + key + var_val_len + val）
+// 更新block已使用长度（用于逻辑上block划分
 Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr,
                                   size_t length) {
   assert(length <= 0xffff);  // Must fit in two bytes
@@ -96,9 +105,9 @@ Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr,
   EncodeFixed32(buf, crc);
 
   // Write the header and the payload
-  Status s = dest_->Append(Slice(buf, kHeaderSize));
+  Status s = dest_->Append(Slice(buf, kHeaderSize));  // 先写header
   if (s.ok()) {
-    s = dest_->Append(Slice(ptr, length));
+    s = dest_->Append(Slice(ptr, length));            // 再写val（type + var_key_len + key + var_val_len + val）
     if (s.ok()) {
       s = dest_->Flush();
     }

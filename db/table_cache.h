@@ -53,7 +53,7 @@ class TableCache {
   Env* const env_;
   const std::string dbname_;
   const Options& options_;
-  Cache* cache_;
+  Cache* cache_;  // NewLRUCache
 };
 
 }  // namespace leveldb

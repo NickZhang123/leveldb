@@ -53,6 +53,8 @@ bool Reader::SkipToInitialBlock() {
   return true;
 }
 
+// record为读取的log，可能在block内，可能跨block
+// 每次读取一个log，参数返回record保存log
 bool Reader::ReadRecord(Slice* record, std::string* scratch) {
   if (last_record_offset_ < initial_offset_) {
     if (!SkipToInitialBlock()) {
@@ -62,20 +64,23 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
 
   scratch->clear();
   record->clear();
-  bool in_fragmented_record = false;
+
+  bool in_fragmented_record = false;  // 表示是否在读取跨block记录
   // Record offset of the logical record that we're reading
   // 0 is a dummy value to make compilers happy
   uint64_t prospective_record_offset = 0;
 
   Slice fragment;
   while (true) {
+    // 返回值为log类型，参数为log data
     const unsigned int record_type = ReadPhysicalRecord(&fragment);
 
     // ReadPhysicalRecord may have only had an empty trailer remaining in its
     // internal buffer. Calculate the offset of the next physical record now
     // that it has returned, properly accounting for its header size.
+    // log在buffer中的起始offset
     uint64_t physical_record_offset =
-        end_of_buffer_offset_ - buffer_.size() - kHeaderSize - fragment.size();
+        end_of_buffer_offset_ - buffer_.size() - kHeaderSize - fragment.size();   
 
     if (resyncing_) {
       if (record_type == kMiddleType) {
@@ -99,6 +104,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
             ReportCorruption(scratch->size(), "partial record without end(1)");
           }
         }
+
         prospective_record_offset = physical_record_offset;
         scratch->clear();
         *record = fragment;
@@ -115,34 +121,42 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
             ReportCorruption(scratch->size(), "partial record without end(2)");
           }
         }
+        // 保存起始位置
         prospective_record_offset = physical_record_offset;
-        scratch->assign(fragment.data(), fragment.size());
-        in_fragmented_record = true;
+
+        scratch->assign(fragment.data(), fragment.size());  // scratch中拼接每个frag data
+        in_fragmented_record = true;    // first处理后，表示处理跨block的log
         break;
 
       case kMiddleType:
-        if (!in_fragmented_record) {
-          ReportCorruption(fragment.size(),
-                           "missing start of fragmented record(1)");
+        if (!in_fragmented_record) {  
+          // 如果处理到mid，则之前必须会处理first，处理first会置标志位true
+          ReportCorruption(fragment.size(), "missing start of fragmented record(1)");
         } else {
+          // 拼接frag
           scratch->append(fragment.data(), fragment.size());
         }
         break;
 
       case kLastType:
         if (!in_fragmented_record) {
-          ReportCorruption(fragment.size(),
-                           "missing start of fragmented record(2)");
+          ReportCorruption(fragment.size(), "missing start of fragmented record(2)");
         } else {
+          // 拼接frag
           scratch->append(fragment.data(), fragment.size());
+
+          // 输出拼接后的内容
           *record = Slice(*scratch);
+
+          // 本次处理的log起始位置
           last_record_offset_ = prospective_record_offset;
+
           return true;
         }
         break;
 
       case kEof:
-        if (in_fragmented_record) {
+        if (in_fragmented_record) {  // 表示日志不完整
           // This can be caused by the writer dying immediately after
           // writing a physical record but before completing the next; don't
           // treat it as a corruption, just ignore the entire logical record.
@@ -151,7 +165,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         return false;
 
       case kBadRecord:
-        if (in_fragmented_record) {
+        if (in_fragmented_record) {  // 日志不完整
           ReportCorruption(scratch->size(), "error in middle of record");
           in_fragmented_record = false;
           scratch->clear();
@@ -186,12 +200,16 @@ void Reader::ReportDrop(uint64_t bytes, const Status& reason) {
   }
 }
 
+// 返回log类型，result为解析出来的一个log data
 unsigned int Reader::ReadPhysicalRecord(Slice* result) {
   while (true) {
+    // 如果当前block处理完后，重新读取一个block
     if (buffer_.size() < kHeaderSize) {
       if (!eof_) {
         // Last read was a full read, so this is a trailer to skip
         buffer_.clear();
+
+        // 读取block 32k
         Status status = file_->Read(kBlockSize, &buffer_, backing_store_);
         end_of_buffer_offset_ += buffer_.size();
         if (!status.ok()) {
@@ -200,6 +218,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
           eof_ = true;
           return kEof;
         } else if (buffer_.size() < kBlockSize) {
+          // 读完
           eof_ = true;
         }
         continue;
@@ -214,11 +233,14 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
     }
 
     // Parse the header
+    // 解析block中的log
     const char* header = buffer_.data();
     const uint32_t a = static_cast<uint32_t>(header[4]) & 0xff;
     const uint32_t b = static_cast<uint32_t>(header[5]) & 0xff;
     const unsigned int type = header[6];
     const uint32_t length = a | (b << 8);
+
+    // 异常
     if (kHeaderSize + length > buffer_.size()) {
       size_t drop_size = buffer_.size();
       buffer_.clear();
@@ -232,6 +254,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       return kEof;
     }
 
+    // 异常
     if (type == kZeroType && length == 0) {
       // Skip zero length record without reporting any drops since
       // such records are produced by the mmap based writing code in
@@ -256,16 +279,19 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       }
     }
 
+    // 解析完一个log
     buffer_.remove_prefix(kHeaderSize + length);
 
     // Skip physical record that started before initial_offset_
-    if (end_of_buffer_offset_ - buffer_.size() - kHeaderSize - length <
-        initial_offset_) {
+    if (end_of_buffer_offset_ - buffer_.size() - kHeaderSize - length < initial_offset_) {
       result->clear();
       return kBadRecord;
     }
 
+    // result保存log
     *result = Slice(header + kHeaderSize, length);
+
+    // 返回类型
     return type;
   }
 }

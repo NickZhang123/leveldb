@@ -42,6 +42,7 @@ class DBImpl : public DB {
   Status Write(const WriteOptions& options, WriteBatch* updates) override;
   Status Get(const ReadOptions& options, const Slice& key,
              std::string* value) override;
+             
   Iterator* NewIterator(const ReadOptions&) override;
   const Snapshot* GetSnapshot() override;
   void ReleaseSnapshot(const Snapshot* snapshot) override;
@@ -178,7 +179,7 @@ class DBImpl : public DB {
   MemTable* imm_ GUARDED_BY(mutex_);  // Memtable being compacted
   std::atomic<bool> has_imm_;         // So bg thread can detect non-null imm_
   WritableFile* logfile_;
-  uint64_t logfile_number_ GUARDED_BY(mutex_);
+  uint64_t logfile_number_ GUARDED_BY(mutex_);  // mem,immem对应的log文件编号
   log::Writer* log_;
   uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
@@ -193,7 +194,7 @@ class DBImpl : public DB {
   std::set<uint64_t> pending_outputs_ GUARDED_BY(mutex_);
 
   // Has a background compaction been scheduled or is running?
-  bool background_compaction_scheduled_ GUARDED_BY(mutex_);
+  bool background_compaction_scheduled_ GUARDED_BY(mutex_); // 后台有一个线程正在compaction
 
   ManualCompaction* manual_compaction_ GUARDED_BY(mutex_);
 

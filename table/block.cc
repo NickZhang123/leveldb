@@ -75,17 +75,17 @@ static inline const char* DecodeEntry(const char* p, const char* limit,
 }
 
 class Block::Iter : public Iterator {
- private:
+ private:  // block格式：entry... + restart point arr + arr_len + type + CRC
   const Comparator* const comparator_;
-  const char* const data_;       // underlying block contents
-  uint32_t const restarts_;      // Offset of restart array (list of fixed32)
-  uint32_t const num_restarts_;  // Number of uint32_t entries in restart array
+  const char* const data_;       // underlying block contents                     block内容
+  uint32_t const restarts_;      // Offset of restart array (list of fixed32)    重启点数组offset
+  uint32_t const num_restarts_;  // Number of uint32_t entries in restart array  重启点数组个数
 
   // current_ is offset in data_ of current entry.  >= restarts_ if !Valid
-  uint32_t current_;
-  uint32_t restart_index_;  // Index of restart block in which current_ falls
+  uint32_t current_;                                                          // 当前位置 data offset
+  uint32_t restart_index_;  // Index of restart block in which current_ falls // 当前重启数组 offset index
   std::string key_;
-  Slice value_;
+  Slice value_;   // 当前entry地址位置
   Status status_;
 
   inline int Compare(const Slice& a, const Slice& b) const {
@@ -93,15 +93,18 @@ class Block::Iter : public Iterator {
   }
 
   // Return the offset in data_ just past the end of the current entry.
+  // 返回下一个地址的偏移offset
   inline uint32_t NextEntryOffset() const {
     return (value_.data() + value_.size()) - data_;
   }
 
+  // 获取重启点数组中的第index个元素
   uint32_t GetRestartPoint(uint32_t index) {
     assert(index < num_restarts_);
     return DecodeFixed32(data_ + restarts_ + index * sizeof(uint32_t));
   }
 
+  // 转到index对应的value位置
   void SeekToRestartPoint(uint32_t index) {
     key_.clear();
     restart_index_ = index;
@@ -113,8 +116,7 @@ class Block::Iter : public Iterator {
   }
 
  public:
-  Iter(const Comparator* comparator, const char* data, uint32_t restarts,
-       uint32_t num_restarts)
+  Iter(const Comparator* comparator, const char* data, uint32_t restarts, uint32_t num_restarts)
       : comparator_(comparator),
         data_(data),
         restarts_(restarts),
@@ -124,7 +126,7 @@ class Block::Iter : public Iterator {
     assert(num_restarts_ > 0);
   }
 
-  bool Valid() const override { return current_ < restarts_; }
+  bool Valid() const override { return current_ < restarts_; }  // entry在offset数组前
   Status status() const override { return status_; }
   Slice key() const override {
     assert(Valid());
@@ -266,8 +268,8 @@ class Block::Iter : public Iterator {
       return false;
     } else {
       key_.resize(shared);
-      key_.append(p, non_shared);
-      value_ = Slice(p + non_shared, value_length);
+      key_.append(p, non_shared);  // 解析第一个entry时，shared=0， non_shared为全部entry
+      value_ = Slice(p + non_shared, value_length);  // 解析value
       while (restart_index_ + 1 < num_restarts_ &&
              GetRestartPoint(restart_index_ + 1) < current_) {
         ++restart_index_;

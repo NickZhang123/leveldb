@@ -42,11 +42,13 @@ class FilterBlockBuilder {
   void GenerateFilter();
 
   const FilterPolicy* policy_;
-  std::string keys_;             // Flattened key contents
-  std::vector<size_t> start_;    // Starting index in keys_ of each key
-  std::string result_;           // Filter data computed so far
+
+  std::string keys_;             // Flattened key contents   每次添加的key
+  std::vector<size_t> start_;    // Starting index in keys_ of each key  每次添加key时，保存上一个key的末尾size
+
+  std::string result_;           // Filter data computed so far  最终要写入的过滤器内容
   std::vector<Slice> tmp_keys_;  // policy_->CreateFilter() argument
-  std::vector<uint32_t> filter_offsets_;
+  std::vector<uint32_t> filter_offsets_;  // 保存每个过滤器的偏移offset
 };
 
 class FilterBlockReader {
@@ -57,10 +59,10 @@ class FilterBlockReader {
 
  private:
   const FilterPolicy* policy_;
-  const char* data_;    // Pointer to filter data (at block-start)
-  const char* offset_;  // Pointer to beginning of offset array (at block-end)
-  size_t num_;          // Number of entries in offset array
-  size_t base_lg_;      // Encoding parameter (see kFilterBaseLg in .cc file)
+  const char* data_;    // Pointer to filter data (at block-start)              // filter data起始位置
+  const char* offset_;  // Pointer to beginning of offset array (at block-end)  // filter offset array 起始位置
+  size_t num_;          // Number of entries in offset array                    // filter offser array 元素个数
+  size_t base_lg_;      // Encoding parameter (see kFilterBaseLg in .cc file)   // 标识，也是filter计算的单位，默认为11，对应单位2k
 };
 
 }  // namespace leveldb

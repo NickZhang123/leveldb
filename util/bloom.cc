@@ -18,7 +18,9 @@ class BloomFilterPolicy : public FilterPolicy {
  public:
   explicit BloomFilterPolicy(int bits_per_key) : bits_per_key_(bits_per_key) {
     // We intentionally round down to reduce probing cost a little bit
-    k_ = static_cast<size_t>(bits_per_key * 0.69);  // 0.69 =~ ln(2)
+    // 最佳准确率公式 k = ln2 * (m/n)
+    // k为hash函数格式，m为bit数，n为元素个数; m/n表示平均每个key可用bit数，默认为10
+    k_ = static_cast<size_t>(bits_per_key * 0.69);  // 0.69 =~ ln(2);  
     if (k_ < 1) k_ = 1;
     if (k_ > 30) k_ = 30;
   }
@@ -27,24 +29,32 @@ class BloomFilterPolicy : public FilterPolicy {
 
   void CreateFilter(const Slice* keys, int n, std::string* dst) const override {
     // Compute bloom filter size (in both bits and bytes)
+    // 1. 计算bloom filter数组大小
     size_t bits = n * bits_per_key_;
 
     // For small n, we can see a very high false positive rate.  Fix it
     // by enforcing a minimum bloom filter length.
     if (bits < 64) bits = 64;
 
+    // 所占用字节数对齐后，在计算位数
     size_t bytes = (bits + 7) / 8;
     bits = bytes * 8;
 
+    // 2. 结合本次目标值，重置目标string大小
     const size_t init_size = dst->size();
     dst->resize(init_size + bytes, 0);
+
+    // 3. 首先put本次hash函数个数
     dst->push_back(static_cast<char>(k_));  // Remember # of probes in filter
+
+    // 4. ？
     char* array = &(*dst)[init_size];
     for (int i = 0; i < n; i++) {
       // Use double-hashing to generate a sequence of hash values.
       // See analysis in [Kirsch,Mitzenmacher 2006].
       uint32_t h = BloomHash(keys[i]);
-      const uint32_t delta = (h >> 17) | (h << 15);  // Rotate right 17 bits
+      const uint32_t delta = (h >> 17) | (h << 15);  // Rotate right 17 bits; 总共32位，相当于将后面17位移动至头部
+
       for (size_t j = 0; j < k_; j++) {
         const uint32_t bitpos = h % bits;
         array[bitpos / 8] |= (1 << (bitpos % 8));

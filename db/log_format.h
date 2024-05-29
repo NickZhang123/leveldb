@@ -11,15 +11,20 @@
 namespace leveldb {
 namespace log {
 
-enum RecordType {
+
+// 如果记录能装入block，则记录形成一个trunk，trunk类型为full
+// 如果记录太大，不止占用一个block，则每个block形成一个trunk记录
+//    第一个block中的trunk类型为first，中间block的trunk类型为middle，最后一个block的trunk类型为last
+// RecordType理解为上述trunk类型
+enum RecordType {  
   // Zero is reserved for preallocated files
   kZeroType = 0,
 
-  kFullType = 1,
+  kFullType = 1,  // 记录能在一个block中容纳
 
   // For fragments
-  kFirstType = 2,
-  kMiddleType = 3,
+  kFirstType = 2,   // 记录大于block剩余空间且是记录头部，则trunk类型为first
+  kMiddleType = 3,  
   kLastType = 4
 };
 static const int kMaxRecordType = kLastType;

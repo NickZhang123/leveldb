@@ -58,6 +58,8 @@ class MemTableIterator : public Iterator {
   void SeekToLast() override { iter_.SeekToLast(); }
   void Next() override { iter_.Next(); }
   void Prev() override { iter_.Prev(); }
+  
+  // key和value函数分别解析 iter_中的内容
   Slice key() const override { return GetLengthPrefixedSlice(iter_.key()); }
   Slice value() const override {
     Slice key_slice = GetLengthPrefixedSlice(iter_.key());
@@ -78,16 +80,22 @@ void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
   // Format of an entry is concatenation of:
   //  key_size     : varint32 of internal_key.size()
   //  key bytes    : char[internal_key.size()]
-  //  tag          : uint64((sequence << 8) | type)
+  //  tag          : uint64((sequence << 8) | type)  // sequence << 8 表示seq占用7个字节
   //  value_size   : varint32 of value.size()
   //  value bytes  : char[value.size()]
+
+  // 格式：var_key_len + key + tag(seq + type) + var_val_len + val
+
   size_t key_size = key.size();
   size_t val_size = value.size();
-  size_t internal_key_size = key_size + 8;
+  size_t internal_key_size = key_size + 8;  // 8 = seq 7 + type 1
   const size_t encoded_len = VarintLength(internal_key_size) +
                              internal_key_size + VarintLength(val_size) +
                              val_size;
+  // 1. 分配内存空间
   char* buf = arena_.Allocate(encoded_len);
+
+  // 2. 按照格式编码
   char* p = EncodeVarint32(buf, internal_key_size);
   std::memcpy(p, key.data(), key_size);
   p += key_size;
@@ -96,6 +104,8 @@ void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
   p = EncodeVarint32(p, val_size);
   std::memcpy(p, value.data(), val_size);
   assert(p + val_size == buf + encoded_len);
+
+  // 3. 插入memtable，实际是跳表结构
   table_.Insert(buf);
 }
 

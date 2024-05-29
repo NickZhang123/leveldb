@@ -142,6 +142,8 @@ bool GetVarint64(Slice* input, uint64_t* value) {
   }
 }
 
+// 解码变长key_len和key，解码变长val_len和val的函数
+// result为解码后的key or val
 bool GetLengthPrefixedSlice(Slice* input, Slice* result) {
   uint32_t len;
   if (GetVarint32(input, &len) && input->size() >= len) {

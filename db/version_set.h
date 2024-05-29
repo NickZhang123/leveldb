@@ -146,22 +146,24 @@ class Version {
                           bool (*func)(void*, int, FileMetaData*));
 
   VersionSet* vset_;  // VersionSet to which this Version belongs
+
+  // 管理Version链表
   Version* next_;     // Next version in linked list
   Version* prev_;     // Previous version in linked list
   int refs_;          // Number of live refs to this version
 
   // List of files per level
-  std::vector<FileMetaData*> files_[config::kNumLevels];
+  std::vector<FileMetaData*> files_[config::kNumLevels]; // kNumLevels = 7
 
   // Next file to compact based on seek stats.
-  FileMetaData* file_to_compact_;
+  FileMetaData* file_to_compact_;  // seek到一定次数后需要compaction的file
   int file_to_compact_level_;
 
   // Level that should be compacted next and its compaction score.
   // Score < 1 means compaction is not strictly needed.  These fields
   // are initialized by Finalize().
-  double compaction_score_;
-  int compaction_level_;
+  double compaction_score_;   // >=1可触发size compaction
+  int compaction_level_;      // 得分最大的level
 };
 
 class VersionSet {
@@ -226,7 +228,7 @@ class VersionSet {
   // Return the log file number for the log file that is currently
   // being compacted, or zero if there is no such log file.
   uint64_t PrevLogNumber() const { return prev_log_number_; }
-
+ 
   // Pick level and inputs for a new compaction.
   // Returns nullptr if there is no compaction to be done.
   // Otherwise returns a pointer to a heap-allocated object that
@@ -298,9 +300,9 @@ class VersionSet {
   const Options* const options_;
   TableCache* const table_cache_;
   const InternalKeyComparator icmp_;
-  uint64_t next_file_number_;
-  uint64_t manifest_file_number_;
-  uint64_t last_sequence_;
+  uint64_t next_file_number_;       // SST文件编号分配管理
+  uint64_t manifest_file_number_;   // 
+  uint64_t last_sequence_;    // 下一个seq
   uint64_t log_number_;
   uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
 
@@ -312,7 +314,7 @@ class VersionSet {
 
   // Per-level key at which the next compaction at that level should start.
   // Either an empty string, or a valid InternalKey.
-  std::string compact_pointer_[config::kNumLevels];
+  std::string compact_pointer_[config::kNumLevels];  // 保存每层起始compaction位置？（上次compcation结束的最大key）
 };
 
 // A Compaction encapsulates information about a compaction.
@@ -365,7 +367,7 @@ class Compaction {
 
   int level_;
   uint64_t max_output_file_size_;
-  Version* input_version_;
+  Version* input_version_;  // compaction前版本
   VersionEdit edit_;
 
   // Each compaction reads inputs from "level_" and "level_+1"

@@ -120,7 +120,7 @@ Options SanitizeOptions(const std::string& dbname,
 
 static int TableCacheSize(const Options& sanitized_options) {
   // Reserve ten files or so for other uses and give the rest to TableCache.
-  return sanitized_options.max_open_files - kNumNonTableCacheFiles;
+  return sanitized_options.max_open_files - kNumNonTableCacheFiles;  // 1000-10
 }
 
 DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
@@ -237,6 +237,7 @@ void DBImpl::RemoveObsoleteFiles() {
 
   std::vector<std::string> filenames;
   env_->GetChildren(dbname_, &filenames);  // Ignoring errors on purpose
+  
   uint64_t number;
   FileType type;
   std::vector<std::string> files_to_delete;
@@ -403,7 +404,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   // Open the log file
   std::string fname = LogFileName(dbname_, log_number);
   SequentialFile* file;
-  Status status = env_->NewSequentialFile(fname, &file);
+  Status status = env_->NewSequentialFile(fname, &file);   // 只读文件
   if (!status.ok()) {
     MaybeIgnoreError(&status);
     return status;
@@ -429,18 +430,24 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   WriteBatch batch;
   int compactions = 0;
   MemTable* mem = nullptr;
+
+  // 循环读取log
   while (reader.ReadRecord(&record, &scratch) && status.ok()) {
     if (record.size() < 12) {
-      reporter.Corruption(record.size(),
-                          Status::Corruption("log record too small"));
+      reporter.Corruption(record.size(), Status::Corruption("log record too small"));
       continue;
     }
+
+    // 填充WriteBatch
     WriteBatchInternal::SetContents(&batch, record);
 
+    // 创建memtable
     if (mem == nullptr) {
       mem = new MemTable(internal_comparator_);
       mem->Ref();
     }
+
+    // 写入memtable
     status = WriteBatchInternal::InsertInto(&batch, mem);
     MaybeIgnoreError(&status);
     if (!status.ok()) {
@@ -452,6 +459,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
       *max_sequence = last_seq;
     }
 
+    // memtable >= 4M, 直接写入sst
     if (mem->ApproximateMemoryUsage() > options_.write_buffer_size) {
       compactions++;
       *save_manifest = true;
@@ -502,17 +510,23 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   return status;
 }
 
+// immutable dump L0
 Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
                                 Version* base) {
   mutex_.AssertHeld();
   const uint64_t start_micros = env_->NowMicros();
+
+  // 1. 新的L0 sst文件编号
   FileMetaData meta;
   meta.number = versions_->NewFileNumber();
   pending_outputs_.insert(meta.number);
+
+  // 迭代器迭代memtable中的skiplist
   Iterator* iter = mem->NewIterator();
   Log(options_.info_log, "Level-0 table #%llu: started",
       (unsigned long long)meta.number);
 
+  // 2. 释放锁，内部构建sst内容并下盘
   Status s;
   {
     mutex_.Unlock();
@@ -528,6 +542,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
 
   // Note that if file_size is zero, the file has been deleted and
   // should not be added to the manifest.
+  // 3. 计算sst的层高
   int level = 0;
   if (s.ok() && meta.file_size > 0) {
     const Slice min_user_key = meta.smallest.user_key();
@@ -535,8 +550,9 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
     if (base != nullptr) {
       level = base->PickLevelForMemTableOutput(min_user_key, max_user_key);
     }
-    edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
-                  meta.largest);
+
+    // 4. 新增sst文件加入VersionEdit
+    edit->AddFile(level, meta.number, meta.file_size, meta.smallest, meta.largest);
   }
 
   CompactionStats stats;
@@ -659,6 +675,7 @@ void DBImpl::RecordBackgroundError(const Status& s) {
   }
 }
 
+// 是否触发后台compaction
 void DBImpl::MaybeScheduleCompaction() {
   mutex_.AssertHeld();
   if (background_compaction_scheduled_) {
@@ -671,6 +688,7 @@ void DBImpl::MaybeScheduleCompaction() {
              !versions_->NeedsCompaction()) {
     // No work to be done
   } else {
+    // 开始后台compaction
     background_compaction_scheduled_ = true;
     env_->Schedule(&DBImpl::BGWork, this);
   }
@@ -681,7 +699,9 @@ void DBImpl::BGWork(void* db) {
 }
 
 void DBImpl::BackgroundCall() {
+  // 需要获取锁
   MutexLock l(&mutex_);
+
   assert(background_compaction_scheduled_);
   if (shutting_down_.load(std::memory_order_acquire)) {
     // No more background work when shutting down.
@@ -696,12 +716,14 @@ void DBImpl::BackgroundCall() {
   // Previous compaction may have produced too many files in a level,
   // so reschedule another compaction if needed.
   MaybeScheduleCompaction();
+
   background_work_finished_signal_.SignalAll();
 }
 
 void DBImpl::BackgroundCompaction() {
   mutex_.AssertHeld();
 
+  // 1. 首先immutable dump到L0
   if (imm_ != nullptr) {
     CompactMemTable();
     return;
@@ -711,6 +733,7 @@ void DBImpl::BackgroundCompaction() {
   bool is_manual = (manual_compaction_ != nullptr);
   InternalKey manual_end;
   if (is_manual) {
+    // 2. 手动触发compaction
     ManualCompaction* m = manual_compaction_;
     c = versions_->CompactRange(m->level, m->begin, m->end);
     m->done = (c == nullptr);
@@ -1198,34 +1221,46 @@ Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
 }
 
 Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
+  // 1. 构建Writer对象
   Writer w(&mutex_);
   w.batch = updates;
   w.sync = options.sync;
   w.done = false;
 
+  // 2. Writer对象加入队列，等待或者直接执行
   MutexLock l(&mutex_);
   writers_.push_back(&w);
   while (!w.done && &w != writers_.front()) {
-    w.cv.Wait();
+    // 如果队列中还有其他任务，则等待（第一个任务在运行的时候会释放锁，以便其他任务进入队列）
+    // 当前面任务完成后，这里wait唤醒可能因为锁导致冲突；已经被处理的Writer会退出函数释放锁，需要下次被处理的函数加锁后重新进行新一轮处理
+    w.cv.Wait(); 
   }
   if (w.done) {
     return w.status;
   }
 
   // May temporarily unlock and wait.
+  // 3. 
   Status status = MakeRoomForWrite(updates == nullptr);
+
+  // seq由版本类保存
   uint64_t last_sequence = versions_->LastSequence();
   Writer* last_writer = &w;
   if (status.ok() && updates != nullptr) {  // nullptr batch is for compactions
+    // 4. 合并队列中的WriteBatch，更新WriteBatch seq
     WriteBatch* write_batch = BuildBatchGroup(&last_writer);
-    WriteBatchInternal::SetSequence(write_batch, last_sequence + 1);
-    last_sequence += WriteBatchInternal::Count(write_batch);
+
+    // 修改writebatch中的seq为上次使用的seq+1
+    WriteBatchInternal::SetSequence(write_batch, last_sequence + 1);  
+    // 计算下次使用的seq = last_seq + count
+    last_sequence += WriteBatchInternal::Count(write_batch);  
 
     // Add to log and apply to memtable.  We can release the lock
     // during this phase since &w is currently responsible for logging
     // and protects against concurrent loggers and concurrent writes
     // into mem_.
     {
+      // 5. 释放锁，其他Writer可以加入队列，本Writer的WriteBatch内容写入log
       mutex_.Unlock();
       status = log_->AddRecord(WriteBatchInternal::Contents(write_batch));
       bool sync_error = false;
@@ -1235,9 +1270,13 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
           sync_error = true;
         }
       }
+
+      // 6. log写入成功后，写入memtable
       if (status.ok()) {
         status = WriteBatchInternal::InsertInto(write_batch, mem_);
       }
+
+      // 7. 再次锁定，更新seq，唤醒被合并的Writer并从Writer队列中移除
       mutex_.Lock();
       if (sync_error) {
         // The state of the log file is indeterminate: the log record we
@@ -1246,49 +1285,60 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
         RecordBackgroundError(status);
       }
     }
+    // 清理合并后的临时WriteBatch
     if (write_batch == tmp_batch_) tmp_batch_->Clear();
 
+    // 更新seq
     versions_->SetLastSequence(last_sequence);
   }
 
+  // 如果是合并Writer处理完成，标记每个Writer已完成并唤醒Writer，同时从Writer队列中删除
   while (true) {
     Writer* ready = writers_.front();
     writers_.pop_front();
-    if (ready != &w) {
+
+    // 如果是批量处理，则唤醒批量处理中的任务
+    if (ready != &w) {  
       ready->status = status;
       ready->done = true;
-      ready->cv.Signal();
+      ready->cv.Signal();  // 唤醒被合并的Writer，此时无法获取锁，等待锁释放？
     }
     if (ready == last_writer) break;
   }
 
   // Notify new head of write queue
+  // 8. 唤醒Writer队列中未处理的第一个任务
   if (!writers_.empty()) {
-    writers_.front()->cv.Signal();
+    writers_.front()->cv.Signal();  // 唤醒首部，等待所释放唤醒？
   }
 
-  return status;
+  return status; // 返回后释放锁
 }
 
 // REQUIRES: Writer list must be non-empty
 // REQUIRES: First writer must have a non-null batch
+// 合并Writer，参数保存合并后的最后一个Writer， 合并后的WriteBatch保存至tmp_batch_
 WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
   mutex_.AssertHeld();
   assert(!writers_.empty());
+
+  // 1. 以第一个Writer作为合并的基础
   Writer* first = writers_.front();
   WriteBatch* result = first->batch;
   assert(result != nullptr);
 
+  // 2. 计算本批最大size； 如果第一个Writer大于128K，则本批最大为1M，否则最大为128K
   size_t size = WriteBatchInternal::ByteSize(first->batch);
 
   // Allow the group to grow up to a maximum size, but if the
   // original write is small, limit the growth so we do not slow
   // down the small write too much.
-  size_t max_size = 1 << 20;
-  if (size <= (128 << 10)) {
+  size_t max_size = 1 << 20;  // max_size = 1M
+  if (size <= (128 << 10)) {  // 128K
     max_size = size + (128 << 10);
   }
 
+  // 3. 遍历Writer vector
   *last_writer = first;
   std::deque<Writer*>::iterator iter = writers_.begin();
   ++iter;  // Advance past "first"
@@ -1300,6 +1350,7 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
     }
 
     if (w->batch != nullptr) {
+      // 累加每个Writer的size，并判断size是否超限
       size += WriteBatchInternal::ByteSize(w->batch);
       if (size > max_size) {
         // Do not make batch too big
@@ -1307,14 +1358,18 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
       }
 
       // Append to *result
+      // 使用tmp_batch_最为合并输出目标
       if (result == first->batch) {
         // Switch to temporary batch instead of disturbing caller's batch
         result = tmp_batch_;
         assert(WriteBatchInternal::Count(result) == 0);
         WriteBatchInternal::Append(result, first->batch);
       }
+
       WriteBatchInternal::Append(result, w->batch);
     }
+
+    // 保存本批中最后一个Writer
     *last_writer = w;
   }
   return result;
@@ -1323,7 +1378,7 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
 // REQUIRES: mutex_ is held
 // REQUIRES: this thread is currently at the front of the writer queue
 Status DBImpl::MakeRoomForWrite(bool force) {
-  mutex_.AssertHeld();
+  mutex_.AssertHeld();  // 必须是加锁状态
   assert(!writers_.empty());
   bool allow_delay = !force;
   Status s;
@@ -1332,8 +1387,9 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // Yield previous error
       s = bg_error_;
       break;
-    } else if (allow_delay && versions_->NumLevelFiles(0) >=
-                                  config::kL0_SlowdownWritesTrigger) {
+    } else if (allow_delay && versions_->NumLevelFiles(0) >= config::kL0_SlowdownWritesTrigger) { // L0压力大，增延时，不管当前memtable是否可用，均增加延时
+      // kL0_SlowdownWritesTrigger = 8, 即L0层SST文件格式超过最大限制8个时，且允许等待，则等待1ms
+
       // We are getting close to hitting a hard limit on the number of
       // L0 files.  Rather than delaying a single write by several
       // seconds when we hit the hard limit, start delaying each
@@ -1341,28 +1397,29 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // this delay hands over some CPU to the compaction thread in
       // case it is sharing the same core as the writer.
       mutex_.Unlock();
-      env_->SleepForMicroseconds(1000);
+      env_->SleepForMicroseconds(1000);  // 如果参数force为0， 则可以休息1ms再次检查
       allow_delay = false;  // Do not delay a single write more than once
       mutex_.Lock();
-    } else if (!force &&
-               (mem_->ApproximateMemoryUsage() <= options_.write_buffer_size)) {
+    } else if (!force && (mem_->ApproximateMemoryUsage() <= options_.write_buffer_size)) {  // 当前memtable可用
+      // 使用当前memtable
       // There is room in current memtable
       break;
-    } else if (imm_ != nullptr) {
+    } else if (imm_ != nullptr) {  // memtable空间不够，但immutable还未刷入L0，则等待刷入
       // We have filled up the current memtable, but the previous
       // one is still being compacted, so we wait.
       Log(options_.info_log, "Current memtable full; waiting...\n");
       background_work_finished_signal_.Wait();
-    } else if (versions_->NumLevelFiles(0) >= config::kL0_StopWritesTrigger) {
+    } else if (versions_->NumLevelFiles(0) >= config::kL0_StopWritesTrigger) { // memtable空间不够，imm为空，但是L0层压力太大，等待
+      // kL0_StopWritesTrigger = 12
       // There are too many level-0 files.
       Log(options_.info_log, "Too many L0 files; waiting...\n");
       background_work_finished_signal_.Wait();
-    } else {
+    } else {    // memtable空间不够，imm为空，但是L0层压力尚可，则转换memtable为immutable
       // Attempt to switch to a new memtable and trigger compaction of old
       assert(versions_->PrevLogNumber() == 0);
-      uint64_t new_log_number = versions_->NewFileNumber();
+      uint64_t new_log_number = versions_->NewFileNumber();  // 下一个SST文件编号
       WritableFile* lfile = nullptr;
-      s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &lfile);
+      s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &lfile); // 新生成一个文件
       if (!s.ok()) {
         // Avoid chewing through file number space in a tight loop.
         versions_->ReuseFileNumber(new_log_number);
@@ -1384,14 +1441,17 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       }
       delete logfile_;
 
-      logfile_ = lfile;
-      logfile_number_ = new_log_number;
-      log_ = new log::Writer(lfile);
+      // 切换memtable，memtable对应log
+      logfile_ = lfile;                 // 新文件
+      logfile_number_ = new_log_number; // 新文件编号
+      log_ = new log::Writer(lfile);    // 新负责写日志的Writer对象
       imm_ = mem_;
       has_imm_.store(true, std::memory_order_release);
       mem_ = new MemTable(internal_comparator_);
       mem_->Ref();
       force = false;  // Do not force another compaction if have room
+
+      // 是否需要触发compaction
       MaybeScheduleCompaction();
     }
   }

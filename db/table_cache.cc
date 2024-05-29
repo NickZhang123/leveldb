@@ -29,8 +29,7 @@ static void UnrefEntry(void* arg1, void* arg2) {
   cache->Release(h);
 }
 
-TableCache::TableCache(const std::string& dbname, const Options& options,
-                       int entries)
+TableCache::TableCache(const std::string& dbname, const Options& options, int entries)
     : env_(options.env),
       dbname_(dbname),
       options_(options),
@@ -38,13 +37,14 @@ TableCache::TableCache(const std::string& dbname, const Options& options,
 
 TableCache::~TableCache() { delete cache_; }
 
-Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
-                             Cache::Handle** handle) {
+Status TableCache::FindTable(uint64_t file_number, uint64_t file_size, Cache::Handle** handle) {
   Status s;
   char buf[sizeof(file_number)];
   EncodeFixed64(buf, file_number);
+
   Slice key(buf, sizeof(buf));
   *handle = cache_->Lookup(key);
+  
   if (*handle == nullptr) {
     std::string fname = TableFileName(dbname_, file_number);
     RandomAccessFile* file = nullptr;
@@ -72,6 +72,7 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
       *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
     }
   }
+
   return s;
 }
 

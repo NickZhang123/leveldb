@@ -83,20 +83,20 @@ class VersionEdit {
  private:
   friend class VersionSet;
 
-  typedef std::set<std::pair<int, uint64_t>> DeletedFileSet;
+  typedef std::set<std::pair<int, uint64_t>> DeletedFileSet;  // level, number
 
   std::string comparator_;
-  uint64_t log_number_;
+  uint64_t log_number_;           // 日志文件number
   uint64_t prev_log_number_;
-  uint64_t next_file_number_;
+  uint64_t next_file_number_;     // 下一个文件编号
   SequenceNumber last_sequence_;
   bool has_comparator_;
-  bool has_log_number_;
-  bool has_prev_log_number_;
-  bool has_next_file_number_;
-  bool has_last_sequence_;
+  bool has_log_number_;       // log_number_
+  bool has_prev_log_number_;  // prev_log_number_
+  bool has_next_file_number_; // next_file_number_
+  bool has_last_sequence_;    // last_sequence_
 
-  std::vector<std::pair<int, InternalKey>> compact_pointers_;
+  std::vector<std::pair<int, InternalKey>> compact_pointers_;  // 保存level， InternalKey（每层compaction的起始key）
   DeletedFileSet deleted_files_;
   std::vector<std::pair<int, FileMetaData>> new_files_;
 };

@@ -75,6 +75,8 @@ class LEVELDB_EXPORT WriteBatch {
  private:
   friend class WriteBatchInternal;
 
+  // kHeader : seq(8) + count(4)
+  // data：k-v
   std::string rep_;  // See comment in write_batch.cc for the format of rep_
 };
 

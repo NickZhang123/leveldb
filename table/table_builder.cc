@@ -38,12 +38,14 @@ struct TableBuilder::Rep {
   Options options;
   Options index_block_options;
   WritableFile* file;
-  uint64_t offset;
+  uint64_t offset;  // sstable使用文件大小
   Status status;
   BlockBuilder data_block;
   BlockBuilder index_block;
-  std::string last_key;
-  int64_t num_entries;
+
+  std::string last_key; // 最后一次添加的key
+  int64_t num_entries;  // 添加的k-v数量
+
   bool closed;  // Either Finish() or Abandon() has been called.
   FilterBlockBuilder* filter_block;
 
@@ -91,6 +93,7 @@ Status TableBuilder::ChangeOptions(const Options& options) {
   return Status::OK();
 }
 
+// sst添加k-v
 void TableBuilder::Add(const Slice& key, const Slice& value) {
   Rep* r = rep_;
   assert(!r->closed);
@@ -99,6 +102,7 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
   }
 
+  // 创建一个新的data_block
   if (r->pending_index_entry) {
     assert(r->data_block.empty());
     r->options.comparator->FindShortestSeparator(&r->last_key, key);
@@ -108,17 +112,22 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     r->pending_index_entry = false;
   }
 
+  // 数据key写入filter_block
   if (r->filter_block != nullptr) {
     r->filter_block->AddKey(key);
   }
 
+  // 保存最后一个key
   r->last_key.assign(key.data(), key.size());
   r->num_entries++;
+
+  // k-v加入data_block区域
   r->data_block.Add(key, value);
 
+  // 如果data_block使用大于等于4k，则Flush
   const size_t estimated_block_size = r->data_block.CurrentSizeEstimate();
   if (estimated_block_size >= r->options.block_size) {
-    Flush();
+    Flush();  // data_block下盘，filter_data计算
   }
 }
 
@@ -128,16 +137,22 @@ void TableBuilder::Flush() {
   if (!ok()) return;
   if (r->data_block.empty()) return;
   assert(!r->pending_index_entry);
+
+  // 1. data_block落盘
   WriteBlock(&r->data_block, &r->pending_handle);
+
   if (ok()) {
-    r->pending_index_entry = true;
-    r->status = r->file->Flush();
+    r->pending_index_entry = true;  // 新block
+    r->status = r->file->Flush();   // 操作系统文件落盘
   }
+
+  // 2. 每个block刷盘的时候，会计算一个filter_data
   if (r->filter_block != nullptr) {
     r->filter_block->StartBlock(r->offset);
   }
 }
 
+// 压缩后下盘
 void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   // File format contains a sequence of blocks where each block has:
   //    block_data: uint8[n]
@@ -145,7 +160,7 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   //    crc: uint32
   assert(ok());
   Rep* r = rep_;
-  Slice raw = block->Finish();
+  Slice raw = block->Finish();  // 追加重启点到data_block buffer中
 
   Slice block_contents;
   CompressionType type = r->options.compression;
@@ -184,32 +199,43 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
       break;
     }
   }
+
+  // 写数据（计算block_crc并追加）
   WriteRawBlock(block_contents, type, handle);
+
   r->compressed_output.clear();
+
   block->Reset();
 }
 
+// 数据block_contents下盘，添加data_block尾部结构(TYPE+CRC)
 void TableBuilder::WriteRawBlock(const Slice& block_contents,
                                  CompressionType type, BlockHandle* handle) {
   Rep* r = rep_;
   handle->set_offset(r->offset);
   handle->set_size(block_contents.size());
+
+  // 1. 写磁盘数据
   r->status = r->file->Append(block_contents);
   if (r->status.ok()) {
-    char trailer[kBlockTrailerSize];
+    char trailer[kBlockTrailerSize];  // kBlockTrailerSize = 5 ( 1-byte compress_type + 32-bit crc)
     trailer[0] = type;
     uint32_t crc = crc32c::Value(block_contents.data(), block_contents.size());
     crc = crc32c::Extend(crc, trailer, 1);  // Extend crc to cover block type
     EncodeFixed32(trailer + 1, crc32c::Mask(crc));
+
+    // 2. 追加block_tailer
     r->status = r->file->Append(Slice(trailer, kBlockTrailerSize));
     if (r->status.ok()) {
-      r->offset += block_contents.size() + kBlockTrailerSize;
+      r->offset += block_contents.size() + kBlockTrailerSize;  // 增加sstable长度
     }
   }
 }
 
 Status TableBuilder::status() const { return rep_->status; }
 
+// Add接口写data_block, 这里写index_block, filter_block, metaindex_block, 
+// sst文件下盘，追加写filter_block，metaindex_block, index_block, footer
 Status TableBuilder::Finish() {
   Rep* r = rep_;
   Flush();
@@ -221,7 +247,7 @@ Status TableBuilder::Finish() {
   // Write filter block
   if (ok() && r->filter_block != nullptr) {
     WriteRawBlock(r->filter_block->Finish(), kNoCompression,
-                  &filter_block_handle);
+                  &filter_block_handle);  // filter_block_handle保存写filte_block之前的sst offset
   }
 
   // Write metaindex block
@@ -246,7 +272,7 @@ Status TableBuilder::Finish() {
       r->options.comparator->FindShortSuccessor(&r->last_key);
       std::string handle_encoding;
       r->pending_handle.EncodeTo(&handle_encoding);
-      r->index_block.Add(r->last_key, Slice(handle_encoding));
+      r->index_block.Add(r->last_key, Slice(handle_encoding));  // 每次data_block下盘的时候都会添加最后一个key和block位置到index_block
       r->pending_index_entry = false;
     }
     WriteBlock(&r->index_block, &index_block_handle);
