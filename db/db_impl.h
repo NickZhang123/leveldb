@@ -122,12 +122,14 @@ class DBImpl : public DB {
   // Compact the in-memory write buffer to disk.  Switches to a new
   // log-file/memtable and writes a new descriptor iff successful.
   // Errors are recorded in bg_error_.
+  // dump memtable到SST L0接口
   void CompactMemTable() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   Status RecoverLogFile(uint64_t log_number, bool last_log, bool* save_manifest,
                         VersionEdit* edit, SequenceNumber* max_sequence)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
+  // dump memtable到SST L0接口
   Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 

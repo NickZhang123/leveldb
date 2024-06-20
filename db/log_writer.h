@@ -17,6 +17,7 @@ class WritableFile;
 
 namespace log {
 
+// 辅助写wal log的类，log物理上分成一个一个的block，每个block默认32k
 class Writer {
  public:
   // Create a writer that will append data to "*dest".
@@ -34,9 +35,11 @@ class Writer {
 
   ~Writer();
 
+  // 写一个log
   Status AddRecord(const Slice& slice);
 
  private:
+  // 组装header+data格式后下盘，不需要抽满一个block才下盘
   Status EmitPhysicalRecord(RecordType type, const char* ptr, size_t length);
 
   WritableFile* dest_;

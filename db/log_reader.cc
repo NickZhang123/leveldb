@@ -31,16 +31,20 @@ Reader::Reader(SequentialFile* file, Reporter* reporter, bool checksum,
 Reader::~Reader() { delete[] backing_store_; }
 
 bool Reader::SkipToInitialBlock() {
+  // 1. 计算起始位置所在的block起始位置
   const size_t offset_in_block = initial_offset_ % kBlockSize;
   uint64_t block_start_location = initial_offset_ - offset_in_block;
 
+  // 2. 如果起始位置在block中的最后不足一个header的位置，则跳过当前block
   // Don't search a block if we'd be in the trailer
   if (offset_in_block > kBlockSize - 6) {
     block_start_location += kBlockSize;
   }
 
+  // 3. 
   end_of_buffer_offset_ = block_start_location;
 
+  // 4. seek到文件指定位置
   // Skip to start of first block that can contain the initial record
   if (block_start_location > 0) {
     Status skip_status = file_->Skip(block_start_location);
@@ -54,8 +58,9 @@ bool Reader::SkipToInitialBlock() {
 }
 
 // record为读取的log，可能在block内，可能跨block
-// 每次读取一个log，参数返回record保存log
+// 每次读取一个log，参数返回record保存log，参数scratch在跨block时保存拼接的数据
 bool Reader::ReadRecord(Slice* record, std::string* scratch) {
+  // 1. 判断如果有需要，则跳转到指定位置读取
   if (last_record_offset_ < initial_offset_) {
     if (!SkipToInitialBlock()) {
       return false;
@@ -70,18 +75,21 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
   // 0 is a dummy value to make compilers happy
   uint64_t prospective_record_offset = 0;
 
+  // 2. 读取文件中的记录
   Slice fragment;
   while (true) {
+    // 2.1 解析一条log
     // 返回值为log类型，参数为log data
     const unsigned int record_type = ReadPhysicalRecord(&fragment);
 
     // ReadPhysicalRecord may have only had an empty trailer remaining in its
     // internal buffer. Calculate the offset of the next physical record now
     // that it has returned, properly accounting for its header size.
-    // log在buffer中的起始offset
+    // log在buffer中的起始offset，也是已经解析的最新日志的起始位置
     uint64_t physical_record_offset =
         end_of_buffer_offset_ - buffer_.size() - kHeaderSize - fragment.size();   
 
+    // 2.2 判断是否为重解析，默认为false
     if (resyncing_) {
       if (record_type == kMiddleType) {
         continue;
@@ -94,6 +102,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
     }
 
     switch (record_type) {
+      // 2.3 日志类型不跨block，保存本次解析的日志至参数record并返回true
       case kFullType:
         if (in_fragmented_record) {
           // Handle bug in earlier versions of log::Writer where
@@ -107,10 +116,11 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
 
         prospective_record_offset = physical_record_offset;
         scratch->clear();
-        *record = fragment;
+        *record = fragment;  
         last_record_offset_ = prospective_record_offset;
         return true;
 
+      // 2.4 日志类型为跨block，且为第一个，先保存至scratch中，并记录日志起始位置prospective_record_offset，继续读取
       case kFirstType:
         if (in_fragmented_record) {
           // Handle bug in earlier versions of log::Writer where
@@ -124,10 +134,13 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         // 保存起始位置
         prospective_record_offset = physical_record_offset;
 
-        scratch->assign(fragment.data(), fragment.size());  // scratch中拼接每个frag data
+        // scratch中拼接每个frag data
+        scratch->assign(fragment.data(), fragment.size());  
+
         in_fragmented_record = true;    // first处理后，表示处理跨block的log
         break;
 
+      // 2.5 日志类型为跨block且为中间block，则拼接内容后继续读取
       case kMiddleType:
         if (!in_fragmented_record) {  
           // 如果处理到mid，则之前必须会处理first，处理first会置标志位true
@@ -138,6 +151,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         }
         break;
 
+      // 2.6 日志类型为跨block且最后一个block，则拼接数据后，保存整个record输出，并记录日志起始位置，返回true
       case kLastType:
         if (!in_fragmented_record) {
           ReportCorruption(fragment.size(), "missing start of fragmented record(2)");
@@ -155,6 +169,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         }
         break;
 
+      // 2.7 正常读完，或者日志读取失败，或者日志被截断； 返回false
       case kEof:
         if (in_fragmented_record) {  // 表示日志不完整
           // This can be caused by the writer dying immediately after
@@ -164,6 +179,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         }
         return false;
 
+      // 2.8 日志损害； 继续读下一个block
       case kBadRecord:
         if (in_fragmented_record) {  // 日志不完整
           ReportCorruption(scratch->size(), "error in middle of record");
@@ -183,7 +199,9 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         break;
       }
     }
+
   }
+
   return false;
 }
 
@@ -203,16 +221,18 @@ void Reader::ReportDrop(uint64_t bytes, const Status& reason) {
 // 返回log类型，result为解析出来的一个log data
 unsigned int Reader::ReadPhysicalRecord(Slice* result) {
   while (true) {
-    // 如果当前block处理完后，重新读取一个block
+    // 1.如果当前block处理完后，重新读取一个block
+    // 读取整个block后，可能读取失败，可能读取完
     if (buffer_.size() < kHeaderSize) {
       if (!eof_) {
         // Last read was a full read, so this is a trailer to skip
         buffer_.clear();
 
-        // 读取block 32k
+        // 顺序读取block 32k（读完后指针后移，下次读取下一个block）
         Status status = file_->Read(kBlockSize, &buffer_, backing_store_);
         end_of_buffer_offset_ += buffer_.size();
-        if (!status.ok()) {
+        if (!status.ok()) {  
+          // 读取失败
           buffer_.clear();
           ReportDrop(kBlockSize, status);
           eof_ = true;
@@ -233,17 +253,19 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
     }
 
     // Parse the header
-    // 解析block中的log
+    // 2. 按照header+data的格式解析block中的log
+
+    // 2.1 先解析header中的crc，len，type
     const char* header = buffer_.data();
     const uint32_t a = static_cast<uint32_t>(header[4]) & 0xff;
     const uint32_t b = static_cast<uint32_t>(header[5]) & 0xff;
     const unsigned int type = header[6];
     const uint32_t length = a | (b << 8);
 
-    // 异常
+    // 2.2 判断len，异常 kBadRecord
     if (kHeaderSize + length > buffer_.size()) {
       size_t drop_size = buffer_.size();
-      buffer_.clear();
+      buffer_.clear();  // 下次再读一个新的block
       if (!eof_) {
         ReportCorruption(drop_size, "bad record length");
         return kBadRecord;
@@ -254,7 +276,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       return kEof;
     }
 
-    // 异常
+    // 2.3 判断type，异常kBadRecord
     if (type == kZeroType && length == 0) {
       // Skip zero length record without reporting any drops since
       // such records are produced by the mmap based writing code in
@@ -263,7 +285,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       return kBadRecord;
     }
 
-    // Check crc
+    // 2.4 判断crc异常，Check crc， kBadRecord
     if (checksum_) {
       uint32_t expected_crc = crc32c::Unmask(DecodeFixed32(header));
       uint32_t actual_crc = crc32c::Value(header + 6, 1 + length);
@@ -279,7 +301,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       }
     }
 
-    // 解析完一个log
+    // 3. 解析完一个log，指针后移
     buffer_.remove_prefix(kHeaderSize + length);
 
     // Skip physical record that started before initial_offset_
@@ -288,10 +310,10 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       return kBadRecord;
     }
 
-    // result保存log
+    // 4. result保存解析出来的日志，只保存data部分
     *result = Slice(header + kHeaderSize, length);
 
-    // 返回类型
+    // 5. 返回解析出来的类型
     return type;
   }
 }

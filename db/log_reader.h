@@ -63,7 +63,7 @@ class Reader {
  private:
   // Extend record types with the following special values
   enum {
-    kEof = kMaxRecordType + 1,
+    kEof = kMaxRecordType + 1,   // 日志文件读取失败
     // Returned whenever we find an invalid physical record.
     // Currently there are three situations in which this happens:
     // * The record has an invalid CRC (ReadPhysicalRecord reports a drop)
@@ -88,7 +88,7 @@ class Reader {
   SequentialFile* const file_;
   Reporter* const reporter_;
   bool const checksum_;
-  char* const backing_store_;
+  char* const backing_store_;  // 用来保存每个block的内存
   Slice buffer_;
   bool eof_;  // Last Read() indicated EOF by returning < kBlockSize
 
@@ -96,10 +96,10 @@ class Reader {
   uint64_t last_record_offset_;  // block中上次解析的log offset
 
   // Offset of the first location past the end of buffer_.
-  uint64_t end_of_buffer_offset_;  // 读取带解析的block尾部
+  uint64_t end_of_buffer_offset_;  // 读取带解析的block尾部（保存已解析的文件位置）
 
   // Offset at which to start looking for the first record to return
-  uint64_t const initial_offset_;
+  uint64_t const initial_offset_;  // 初始化读取位置
 
   // True if we are resynchronizing after a seek (initial_offset_ > 0). In
   // particular, a run of kMiddleType and kLastType records can be silently

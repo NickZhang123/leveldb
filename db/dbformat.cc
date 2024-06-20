@@ -114,6 +114,7 @@ bool InternalFilterPolicy::KeyMayMatch(const Slice& key, const Slice& f) const {
   return user_policy_->KeyMayMatch(ExtractUserKey(key), f);
 }
 
+// 查找指定seq的key
 LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
   size_t usize = user_key.size();
   size_t needed = usize + 13;  // A conservative estimate
@@ -123,6 +124,8 @@ LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
   } else {
     dst = new char[needed];
   }
+
+  // 组装innerkey（key+seq+type）
   start_ = dst;
   dst = EncodeVarint32(dst, usize + 8);
   kstart_ = dst;

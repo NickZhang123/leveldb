@@ -43,6 +43,7 @@ static const char* EncodeKey(std::string* scratch, const Slice& target) {
   return scratch->data();
 }
 
+// memtable的迭代器借助skiplist迭代器实现
 class MemTableIterator : public Iterator {
  public:
   explicit MemTableIterator(MemTable::Table* table) : iter_(table) {}
@@ -73,8 +74,10 @@ class MemTableIterator : public Iterator {
   std::string tmp_;  // For passing to EncodeKey
 };
 
+// dump memtable->L0时使用
 Iterator* MemTable::NewIterator() { return new MemTableIterator(&table_); }
 
+// 格式：var_key_len + key + tag(seq + type) + var_val_len + val
 void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
                    const Slice& value) {
   // Format of an entry is concatenation of:
@@ -111,7 +114,7 @@ void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
 
 bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
   Slice memkey = key.memtable_key();
-  Table::Iterator iter(&table_);
+  Table::Iterator iter(&table_); // 跳表的迭代器
   iter.Seek(memkey.data());
   if (iter.Valid()) {
     // entry format is:
@@ -123,25 +126,31 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
     // Check that it belongs to same user key.  We do not check the
     // sequence number since the Seek() call above should have skipped
     // all entries with overly large sequence numbers.
-    const char* entry = iter.key();
+    const char* entry = iter.key();  // 格式：var_key_len + key + tag(seq + type) + var_val_len + val
     uint32_t key_length;
+    // 解析var_key_len
     const char* key_ptr = GetVarint32Ptr(entry, entry + 5, &key_length);
     if (comparator_.comparator.user_comparator()->Compare(
-            Slice(key_ptr, key_length - 8), key.user_key()) == 0) {
+            Slice(key_ptr, key_length - 8), key.user_key()) == 0) {  // 比较key
       // Correct user key
+      // 解析innerkey中的seq+type
       const uint64_t tag = DecodeFixed64(key_ptr + key_length - 8);
       switch (static_cast<ValueType>(tag & 0xff)) {
         case kTypeValue: {
+          // 继续解析var_val_len和val
           Slice v = GetLengthPrefixedSlice(key_ptr + key_length);
           value->assign(v.data(), v.size());
           return true;
         }
+
         case kTypeDeletion:
+          // 如果是删除记录，则数据库中没有这个值，返回notfound
           *s = Status::NotFound(Slice());
           return true;
       }
     }
   }
+
   return false;
 }
 

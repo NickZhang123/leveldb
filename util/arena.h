@@ -43,7 +43,7 @@ class Arena {
   size_t alloc_bytes_remaining_;
 
   // Array of new[] allocated memory blocks
-  std::vector<char*> blocks_;
+  std::vector<char*> blocks_;  // 堆内存空间管理位置，析构时释放这里内存即可
 
   // Total memory usage of the arena.
   //
@@ -52,6 +52,8 @@ class Arena {
   std::atomic<size_t> memory_usage_;
 };
 
+// 分配内存，每次默认分配4k，若空间够，则从剩余空间分配
+// 分则若所需空间大于1k，则按需分配，若所需空间小于1k，则重新分配4k
 inline char* Arena::Allocate(size_t bytes) {
   // The semantics of what to return are a bit messy if we allow
   // 0-byte allocations, so we disallow them here (we don't need

@@ -39,7 +39,7 @@ void WriteBatch::Clear() {
 
 size_t WriteBatch::ApproximateSize() const { return rep_.size(); }
 
-// 遍历WriteBatch中的rep_, 写入handler中
+// 遍历WriteBatch中的rep_, 写入handler中（写入memtable中）
 Status WriteBatch::Iterate(Handler* handler) const {
   Slice input(rep_);
   if (input.size() < kHeader) {
