@@ -143,7 +143,7 @@ void TableBuilder::Flush() {
 
   if (ok()) {
     r->pending_index_entry = true;  // 新block
-    r->statu s= r->file->Flush();   // 操作系统文件落盘
+    r->status= r->file->Flush();   // 操作系统文件落盘
   }
 
   // 2. 每个block刷盘的时候，会计算一个filter_data
