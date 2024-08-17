@@ -34,8 +34,13 @@ class FilterBlockBuilder {
   FilterBlockBuilder(const FilterBlockBuilder&) = delete;
   FilterBlockBuilder& operator=(const FilterBlockBuilder&) = delete;
 
+  // 指定offset生成filter_data和filter_offset
   void StartBlock(uint64_t block_offset);
+
+  // 加入key
   void AddKey(const Slice& key);
+
+  // sst写入filter_data数据
   Slice Finish();
 
  private:
@@ -43,11 +48,12 @@ class FilterBlockBuilder {
 
   const FilterPolicy* policy_;
 
-  std::string keys_;             // Flattened key contents   每次添加的key
-  std::vector<size_t> start_;    // Starting index in keys_ of each key  每次添加key时，保存上一个key的末尾size
+  std::string keys_;             // Flattened key contents   每次添加的key(连续存储key)
+  std::vector<size_t> start_;    // Starting index in keys_ of each key  每次添加key时，保存上一个key的末尾size（分割每个key）
 
   std::string result_;           // Filter data computed so far  最终要写入的过滤器内容
-  std::vector<Slice> tmp_keys_;  // policy_->CreateFilter() argument
+
+  std::vector<Slice> tmp_keys_;  // policy_->CreateFilter() argument  // 一个data_block中的key
   std::vector<uint32_t> filter_offsets_;  // 保存每个过滤器的偏移offset
 };
 

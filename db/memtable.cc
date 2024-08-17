@@ -11,6 +11,7 @@
 
 namespace leveldb {
 
+// 获取key
 static Slice GetLengthPrefixedSlice(const char* data) {
   uint32_t len;
   const char* p = data;

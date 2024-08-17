@@ -38,6 +38,8 @@ void FilterBlockBuilder::AddKey(const Slice& key) {
   keys_.append(k.data(), k.size());  
 }
 
+// 组装下盘数据，之前已经写了filter_data..., 
+// 本次追加filter_offset... + filter_offset_offset + filterBase 
 Slice FilterBlockBuilder::Finish() {
   if (!start_.empty()) {
     GenerateFilter();
@@ -59,6 +61,7 @@ Slice FilterBlockBuilder::Finish() {
   return Slice(result_);
 }
 
+// 产生filter_data和filter_offset
 void FilterBlockBuilder::GenerateFilter() {
   // 1. vector start_保存每次加入key的位置; 获取key个数
   const size_t num_keys = start_.size();  
@@ -87,7 +90,7 @@ void FilterBlockBuilder::GenerateFilter() {
   filter_offsets_.push_back(result_.size());
 
   // 5. 计算filter data并加入result_
-  policy_->CreateFilter(&tmp_keys_[0], static_cast<int>(num_keys), &result_);
+  policy_->CreateFilter(&tmp_keys_[0], static_cast<int>(num_keys), &result_); // 计算结果保存在result中
 
   tmp_keys_.clear();
   keys_.clear();
@@ -120,7 +123,7 @@ bool FilterBlockReader::KeyMayMatch(uint64_t block_offset, const Slice& key) {
   // 1. 计算offset index
   uint64_t index = block_offset >> base_lg_;
   if (index < num_) {
-    // 2. start和limit为其offser index地址范围
+    // 2. start和limit为其offser index地址范围（limit为第二个offset，指定filter_data末尾）
     uint32_t start = DecodeFixed32(offset_ + index * 4);
     uint32_t limit = DecodeFixed32(offset_ + index * 4 + 4);
 
@@ -128,7 +131,7 @@ bool FilterBlockReader::KeyMayMatch(uint64_t block_offset, const Slice& key) {
     // 因此计算出来的start是这组data_block对应filter_data的起始位置，limit则是filter_data的结束位置
     if (start <= limit && limit <= static_cast<size_t>(offset_ - data_)) {
       Slice filter = Slice(data_ + start, limit - start);
-      return policy_->KeyMayMatch(key, filter);
+      return policy_->KeyMayMatch(key, filter);  // 判断key是否在filter_data中
     } else if (start == limit) {
       // Empty filters do not match any keys
       return false;

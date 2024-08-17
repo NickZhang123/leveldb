@@ -414,6 +414,7 @@ bool Version::UpdateStats(const GetStats& stats) {
   FileMetaData* f = stats.seek_file;
   if (f != nullptr) {
     f->allowed_seeks--;
+    // 当seek数量减到0后，设置compaction标记
     if (f->allowed_seeks <= 0 && file_to_compact_ == nullptr) {
       file_to_compact_ = f;
       file_to_compact_level_ = stats.seek_file_level;
@@ -624,7 +625,8 @@ class VersionSet::Builder {
     BySmallestKey cmp;
     cmp.internal_comparator = &vset_->icmp_;
     for (int level = 0; level < config::kNumLevels; level++) {
-      levels_[level].added_files = new FileSet(cmp);  // typedef std::set<FileMetaData*, BySmallestKey> FileSet;
+      // typedef std::set<FileMetaData*, BySmallestKey> FileSet;
+      levels_[level].added_files = new FileSet(cmp);  
     }
   }
 
@@ -685,6 +687,7 @@ class VersionSet::Builder {
       // same as the compaction of 40KB of data.  We are a little
       // conservative and allow approximately one seek for every 16KB
       // of data before triggering a compaction.
+      // 根据文件大小设置文件可seek数，每次查找不到数据seek-1，减到0则开始compcation
       f->allowed_seeks = static_cast<int>((f->file_size / 16384U));
       if (f->allowed_seeks < 100) f->allowed_seeks = 100;
 
@@ -831,7 +834,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   edit->SetNextFile(next_file_number_);
   edit->SetLastSequence(last_sequence_);
 
-  // 生成新的version
+  // 1. 生成新的version
   Version* v = new Version(this);
   {
     Builder builder(this, current_);
@@ -1290,6 +1293,7 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
       }
     }
   }
+
   assert(num <= space);
   Iterator* result = NewMergingIterator(&icmp_, list, num);
   delete[] list;
@@ -1349,7 +1353,7 @@ Compaction* VersionSet::PickCompaction() {
     assert(!c->inputs_[0].empty());
   }
 
-  // 选择level+1层的sst
+  // 选择level+1层的sst  ****
   SetupOtherInputs(c);
 
   return c;
@@ -1444,6 +1448,8 @@ void AddBoundaryInputs(const InternalKeyComparator& icmp,
   3. 计算level,level+1层的总边界
   4. 使用总边界再次扩展匹配level层的新边界
   5. 当level层匹配到新边界且level和level+1层的文件大小总和小于阈值，则用level层新边界去匹配level+1层边界，得到最后两层的sst集合
+
+  尽力扩展level范围：第二次选择level层后，再次计算是否能选择level+1，如果level+1不在扩展，则可使用扩展后的level，否则不使用扩展后的level
 */
 void VersionSet::SetupOtherInputs(Compaction* c) {
   const int level = c->level();
@@ -1484,11 +1490,12 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
       InternalKey new_start, new_limit;
       GetRange(expanded0, &new_start, &new_limit);
       std::vector<FileMetaData*> expanded1;
+
       // 根据level层扩展的sst边界，获取level+1对应的重叠sst和边界sst
       current_->GetOverlappingInputs(level + 1, &new_start, &new_limit, &expanded1);
       AddBoundaryInputs(icmp_, current_->files_[level + 1], &expanded1);
 
-      // 如果再次匹配到的比第一次多，使用第二次匹配的结果
+      // 如果再次选出的level+1层没有增长，则可使用扩招level后的值，否则使用原值
       if (expanded1.size() == c->inputs_[1].size()) {
         Log(options_->info_log,
             "Expanding@%d %d+%d (%ld+%ld bytes) to %d+%d (%ld+%ld bytes)\n",
@@ -1514,14 +1521,15 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
   // We update this immediately instead of waiting for the VersionEdit
   // to be applied so that if the compaction fails, we will try a different
   // key range next time.
-  compact_pointer_[level] = largest.Encode().ToString();
+  compact_pointer_[level] = largest.Encode().ToString();  // 保存level层参与compaction的最大值，以便下次继续从此处开始compaction
+
   c->edit_.SetCompactPointer(level, largest);
 }
 
 Compaction* VersionSet::CompactRange(int level, const InternalKey* begin,
                                      const InternalKey* end) {
   std::vector<FileMetaData*> inputs;
-  current_->GetOverlappingInputs(level, begin, end, &inputs);
+  current_->GetOverlappingInputs(level, begin, end, &inputs); 
   if (inputs.empty()) {
     return nullptr;
   }
@@ -1569,6 +1577,7 @@ Compaction::~Compaction() {
   }
 }
 
+// level数据移动到level+1
 bool Compaction::IsTrivialMove() const {
   const VersionSet* vset = input_version_->vset_;
   // Avoid a move if there is lots of overlapping grandparent data.

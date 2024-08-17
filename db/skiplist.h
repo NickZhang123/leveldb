@@ -261,7 +261,7 @@ bool SkipList<Key, Comparator>::KeyIsAfterNode(const Key& key, Node* n) const {
   return (n != nullptr) && (compare_(n->key, key) < 0);
 }
 
-// 返回和key相同，或者大于key的第一个节点； 
+// 返回大于或者等于目标key的第一个位置，参数保存这个位置的前一个值
 // 注意第二个参数保存路径，即每层的prev节点，以便节点插入（单向链表插入节点到指定位置需要知道位置的prev节点）
 template <typename Key, class Comparator>
 typename SkipList<Key, Comparator>::Node*
@@ -335,7 +335,7 @@ typename SkipList<Key, Comparator>::Node* SkipList<Key, Comparator>::FindLast()
   }
 }
 
-// 构造函数
+// 构造函数，初始化head节点
 template <typename Key, class Comparator>
 SkipList<Key, Comparator>::SkipList(Comparator cmp, Arena* arena)
     : compare_(cmp),

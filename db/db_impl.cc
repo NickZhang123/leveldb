@@ -752,7 +752,7 @@ void DBImpl::BackgroundCompaction() {
   Status status;
   if (c == nullptr) {
     // Nothing to do
-  } else if (!is_manual && c->IsTrivialMove()) {
+  } else if (!is_manual && c->IsTrivialMove()) {  // sst移动至下一层
     // Move file to next level
     assert(c->num_input_files(0) == 1);
     FileMetaData* f = c->input(0, 0);
@@ -770,7 +770,7 @@ void DBImpl::BackgroundCompaction() {
         status.ToString().c_str(), versions_->LevelSummary(&tmp));
   } else {
     CompactionState* compact = new CompactionState(c);
-    status = DoCompactionWork(compact);
+    status = DoCompactionWork(compact);  // 合并
     if (!status.ok()) {
       RecordBackgroundError(status);
     }
@@ -924,6 +924,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   assert(versions_->NumLevelFiles(compact->compaction->level()) > 0);
   assert(compact->builder == nullptr);
   assert(compact->outfile == nullptr);
+
   if (snapshots_.empty()) {
     compact->smallest_snapshot = versions_->LastSequence();
   } else {
@@ -941,6 +942,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   std::string current_user_key;
   bool has_current_user_key = false;
   SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
+
   while (input->Valid() && !shutting_down_.load(std::memory_order_acquire)) {
     // Prioritize immutable compaction work
     if (has_imm_.load(std::memory_order_relaxed)) {
@@ -972,15 +974,17 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       has_current_user_key = false;
       last_sequence_for_key = kMaxSequenceNumber;
     } else {
+      // 如果本次解析的key为新的key，则保存当前key，即新key的最新版本
       if (!has_current_user_key ||
-          user_comparator()->Compare(ikey.user_key, Slice(current_user_key)) !=
-              0) {
+          user_comparator()->Compare(ikey.user_key, Slice(current_user_key)) != 0) {
         // First occurrence of this user key
         current_user_key.assign(ikey.user_key.data(), ikey.user_key.size());
         has_current_user_key = true;
-        last_sequence_for_key = kMaxSequenceNumber;
+        last_sequence_for_key = kMaxSequenceNumber; // 保证这个key不会被drop
       }
 
+      // 上次的key小于smallest_snapshot，相当于有一个有效的最新版本服务smallest_snapshot
+      // 则剩下的小于该版本的都丢掉（这里也可以看出，相同key的新版本排列在前，老版本排在后）
       if (last_sequence_for_key <= compact->smallest_snapshot) {
         // Hidden by an newer entry for same user key
         drop = true;  // (A)
@@ -997,6 +1001,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         drop = true;
       }
 
+      // 保存本次出现版本号的目的：保存一个比smallest_snapshot还要低或者相等的版本号，然后低于这个版本号的记录drop
+      // 如果这个版本号<=smallest_snapshot，则此版本就是目标版本，后续低于目标版本的要删除
       last_sequence_for_key = ikey.sequence;
     }
 #if 0
@@ -1012,21 +1018,23 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     if (!drop) {
       // Open output file if necessary
       if (compact->builder == nullptr) {
-        status = OpenCompactionOutputFile(compact);
+        status = OpenCompactionOutputFile(compact);   // 创建sst
         if (!status.ok()) {
           break;
         }
       }
+
       if (compact->builder->NumEntries() == 0) {
-        compact->current_output()->smallest.DecodeFrom(key);
+        compact->current_output()->smallest.DecodeFrom(key);  // 保存最小值
       }
-      compact->current_output()->largest.DecodeFrom(key);
-      compact->builder->Add(key, input->value());
+
+      compact->current_output()->largest.DecodeFrom(key);  // 保存最大值
+      compact->builder->Add(key, input->value()); // 加入k-v
 
       // Close output file if it is big enough
       if (compact->builder->FileSize() >=
           compact->compaction->MaxOutputFileSize()) {
-        status = FinishCompactionOutputFile(compact, input);
+        status = FinishCompactionOutputFile(compact, input);  // 刷新sst
         if (!status.ok()) {
           break;
         }

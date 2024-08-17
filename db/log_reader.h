@@ -93,9 +93,10 @@ class Reader {
   bool eof_;  // Last Read() indicated EOF by returning < kBlockSize
 
   // Offset of the last record returned by ReadRecord.
-  uint64_t last_record_offset_;  // block中上次解析的log offset
+  uint64_t last_record_offset_;  // block中上次解析的有效log offset
 
   // Offset of the first location past the end of buffer_.
+  // 初始化为0，或者block起始位置； 每次读一个block，则保存下一个block起始位置
   uint64_t end_of_buffer_offset_;  // 读取带解析的block尾部（保存已解析的文件位置）
 
   // Offset at which to start looking for the first record to return

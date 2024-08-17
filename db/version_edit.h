@@ -20,7 +20,7 @@ struct FileMetaData {
 
   int refs;
   int allowed_seeks;  // Seeks allowed until compaction
-  uint64_t number;
+  uint64_t number;    // 文件编号
   uint64_t file_size;    // File size in bytes
   InternalKey smallest;  // Smallest internal key served by table
   InternalKey largest;   // Largest internal key served by table
@@ -86,9 +86,9 @@ class VersionEdit {
   typedef std::set<std::pair<int, uint64_t>> DeletedFileSet;  // level, number
 
   std::string comparator_;
-  uint64_t log_number_;           // 日志文件number
+  uint64_t log_number_;           // 日志文件number， wal log
   uint64_t prev_log_number_;
-  uint64_t next_file_number_;     // 下一个文件编号
+  uint64_t next_file_number_;     // 下一个文件编号，sst文件编号
   SequenceNumber last_sequence_;
   bool has_comparator_;
   bool has_log_number_;       // log_number_

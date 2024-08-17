@@ -157,13 +157,13 @@ class Version {
 
   // Next file to compact based on seek stats.
   FileMetaData* file_to_compact_;  // seek到一定次数后需要compaction的file
-  int file_to_compact_level_;
+  int file_to_compact_level_;      // 上述file对应的level
 
   // Level that should be compacted next and its compaction score.
   // Score < 1 means compaction is not strictly needed.  These fields
   // are initialized by Finalize().
   double compaction_score_;   // >=1可触发size compaction
-  int compaction_level_;      // 得分最大的level
+  int compaction_level_;      // 得分最大的level,该层触发compcation
 };
 
 class VersionSet {
@@ -302,13 +302,13 @@ class VersionSet {
   const InternalKeyComparator icmp_;
   uint64_t next_file_number_;       // SST文件编号分配管理
   uint64_t manifest_file_number_;   // 
-  uint64_t last_sequence_;    // 下一个seq
+  uint64_t last_sequence_;    // 上次使用的seq
   uint64_t log_number_;
   uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
 
   // Opened lazily
-  WritableFile* descriptor_file_;
-  log::Writer* descriptor_log_;
+  WritableFile* descriptor_file_;  // manifest文件
+  log::Writer* descriptor_log_;  
   Version dummy_versions_;  // Head of circular doubly-linked list of versions.
   Version* current_;        // == dummy_versions_.prev_
 
@@ -365,17 +365,18 @@ class Compaction {
 
   Compaction(const Options* options, int level);
 
-  int level_;
+  int level_;  // 触发compcation的上层
   uint64_t max_output_file_size_;
   Version* input_version_;  // compaction前版本
   VersionEdit edit_;
 
   // Each compaction reads inputs from "level_" and "level_+1"
+  // 保存两层参与compcation的file
   std::vector<FileMetaData*> inputs_[2];  // The two sets of inputs
 
   // State used to check for number of overlapping grandparent files
   // (parent == level_ + 1, grandparent == level_ + 2)
-  std::vector<FileMetaData*> grandparents_;
+  std::vector<FileMetaData*> grandparents_;  // 保存level+2的重叠sst
   size_t grandparent_index_;  // Index in grandparent_starts_
   bool seen_key_;             // Some output key has been seen
   int64_t overlapped_bytes_;  // Bytes of overlap between current output

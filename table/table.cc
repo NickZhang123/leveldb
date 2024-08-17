@@ -28,11 +28,11 @@ struct Table::Rep {
   Status status;
   RandomAccessFile* file;
   uint64_t cache_id;
-  FilterBlockReader* filter;
+  FilterBlockReader* filter;   // filter_block
   const char* filter_data;
 
   BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
-  Block* index_block;
+  Block* index_block; 
 };
 
 Status Table::Open(const Options& options, RandomAccessFile* file,

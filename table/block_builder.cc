@@ -55,8 +55,8 @@ void BlockBuilder::Reset() {
 // 计算data_block所需大小
 size_t BlockBuilder::CurrentSizeEstimate() const {
   return (buffer_.size() +                       // Raw data buffer
-          restarts_.size() * sizeof(uint32_t) +  // Restart array
-          sizeof(uint32_t));                     // Restart array length
+          restarts_.size() * sizeof(uint32_t) +  // Restart array，重启点固定大小
+          sizeof(uint32_t));                     // Restart array length  重启点数量，固定大小
 }
 // 追加重启点
 Slice BlockBuilder::Finish() {
@@ -80,7 +80,7 @@ Slice BlockBuilder::Finish() {
 void BlockBuilder::Add(const Slice& key, const Slice& value) {
   Slice last_key_piece(last_key_);
   assert(!finished_);
-  assert(counter_ <= options_->block_restart_interval);
+  assert(counter_ <= options_->block_restart_interval);  // block_restart_interval = 16
   assert(buffer_.empty()  // No values yet?
          || options_->comparator->Compare(key, last_key_piece) > 0);
 
@@ -99,7 +99,7 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
   }
   const size_t non_shared = key.size() - shared;
 
-  // 2. 格式： shared_len + non_shared_len + value_len + un_prefix_key + val
+  // 2. 格式： shared_len + non_shared_len + value_len + noshared_key + val
   // Add "<shared><non_shared><value_size>" to buffer_
   PutVarint32(&buffer_, shared);
   PutVarint32(&buffer_, non_shared);
@@ -112,9 +112,11 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
   // Update state
   // 3. 更新上次key，增加计数
   last_key_.resize(shared);  // 如果有相同前缀，重置为shared前缀
-  last_key_.append(key.data() + shared, non_shared); // 添加本次未重置前缀（为啥不直接重置为0，然后添加完整key？）
+  last_key_.append(key.data() + shared, non_shared); // 添加本次未重置前缀（为啥不直接重置为本次key，然后添加完整key？）
 
   assert(Slice(last_key_) == key);
+
+  // 4. 增加共享计数
   counter_++;
 }
 

@@ -59,7 +59,7 @@ struct TableBuilder::Rep {
   //
   // Invariant: r->pending_index_entry is true only if data_block is empty.
   bool pending_index_entry;
-  BlockHandle pending_handle;  // Handle to add to index block
+  BlockHandle pending_handle;  // Handle to add to index block; 记录每次下盘前的offset和size
 
   std::string compressed_output;
 };
@@ -108,13 +108,13 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     r->options.comparator->FindShortestSeparator(&r->last_key, key);
     std::string handle_encoding;
     r->pending_handle.EncodeTo(&handle_encoding);
-    r->index_block.Add(r->last_key, Slice(handle_encoding));
+    r->index_block.Add(r->last_key, Slice(handle_encoding));  // 每次data block下盘后，记录下盘前的offset和本次下盘size
     r->pending_index_entry = false;
   }
 
   // 数据key写入filter_block
   if (r->filter_block != nullptr) {
-    r->filter_block->AddKey(key);
+    r->filter_block->AddKey(key);   // 只计算key的特，每个key都记录
   }
 
   // 保存最后一个key
@@ -143,7 +143,7 @@ void TableBuilder::Flush() {
 
   if (ok()) {
     r->pending_index_entry = true;  // 新block
-    r->status = r->file->Flush();   // 操作系统文件落盘
+    r->statu s= r->file->Flush();   // 操作系统文件落盘
   }
 
   // 2. 每个block刷盘的时候，会计算一个filter_data
@@ -160,6 +160,7 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   //    crc: uint32
   assert(ok());
   Rep* r = rep_;
+
   Slice raw = block->Finish();  // 追加重启点到data_block buffer中
 
   Slice block_contents;
@@ -200,7 +201,7 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
     }
   }
 
-  // 写数据（计算block_crc并追加）
+  // 写数据block_contents（计算block_crc并追加）
   WriteRawBlock(block_contents, type, handle);
 
   r->compressed_output.clear();
@@ -272,7 +273,7 @@ Status TableBuilder::Finish() {
       r->options.comparator->FindShortSuccessor(&r->last_key);
       std::string handle_encoding;
       r->pending_handle.EncodeTo(&handle_encoding);
-      r->index_block.Add(r->last_key, Slice(handle_encoding));  // 每次data_block下盘的时候都会添加最后一个key和block位置到index_block
+      r->index_block.Add(r->last_key, Slice(handle_encoding));  // 添加最后一个key和data block位置
       r->pending_index_entry = false;
     }
     WriteBlock(&r->index_block, &index_block_handle);

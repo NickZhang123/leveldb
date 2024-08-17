@@ -42,11 +42,11 @@ class BlockBuilder {
 
  private:
   const Options* options_;
-  std::string buffer_;              // Destination buffer   叠加保存shared_len + non_shared_len + value_len + un_prefix_key + val
+  std::string buffer_;              // Destination buffer 叠加保存shared_len + non_shared_len + value_len + un_prefix_key + val
   std::vector<uint32_t> restarts_;  // Restart points     重启点，为buffer_.size()
   int counter_;                     // Number of entries emitted since restart  记录当前数量，每16个加入一个重启点
   bool finished_;                   // Has Finish() been called?
-  std::string last_key_;
+  std::string last_key_;  // 上次写入的key
 };
 
 }  // namespace leveldb
