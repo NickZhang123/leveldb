@@ -37,8 +37,8 @@ struct TableBuilder::Rep {
 
   Options options;
   Options index_block_options;
-  WritableFile* file;
-  uint64_t offset;  // sstable使用文件大小
+  WritableFile* file;   // sst对应的系统文件
+  uint64_t offset;      // sstable使用文件大小
   Status status;
   BlockBuilder data_block;
   BlockBuilder index_block;
@@ -142,8 +142,8 @@ void TableBuilder::Flush() {
   WriteBlock(&r->data_block, &r->pending_handle);
 
   if (ok()) {
-    r->pending_index_entry = true;  // 新block
-    r->status= r->file->Flush();   // 操作系统文件落盘
+    r->pending_index_entry = true;    // 新block
+    r->status= r->file->Flush();      // 操作系统文件落盘
   }
 
   // 2. 每个block刷盘的时候，会计算一个filter_data
@@ -161,7 +161,7 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   assert(ok());
   Rep* r = rep_;
 
-  Slice raw = block->Finish();  // 追加重启点到data_block buffer中
+  Slice raw = block->Finish();    // 将重启点和重启点数量按照固定32位的格式追加到buffer_中
 
   Slice block_contents;
   CompressionType type = r->options.compression;
@@ -239,6 +239,8 @@ Status TableBuilder::status() const { return rep_->status; }
 // sst文件下盘，追加写filter_block，metaindex_block, index_block, footer
 Status TableBuilder::Finish() {
   Rep* r = rep_;
+
+  // 这里写入最后一个data_block
   Flush();
   assert(!r->closed);
   r->closed = true;

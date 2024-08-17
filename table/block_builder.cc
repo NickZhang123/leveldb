@@ -43,6 +43,7 @@ BlockBuilder::BlockBuilder(const Options* options)
   restarts_.push_back(0);  // First restart point is at offset 0
 }
 
+// 每次写完一个block后，reset标记位
 void BlockBuilder::Reset() {
   buffer_.clear();
   restarts_.clear();
@@ -58,7 +59,7 @@ size_t BlockBuilder::CurrentSizeEstimate() const {
           restarts_.size() * sizeof(uint32_t) +  // Restart array，重启点固定大小
           sizeof(uint32_t));                     // Restart array length  重启点数量，固定大小
 }
-// 追加重启点
+// 追加重启点（固定32位大小，以便解析）
 Slice BlockBuilder::Finish() {
   // Append restart array
   // 追加重启点
@@ -86,17 +87,20 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
 
   // 1. 超过16个，建立一个重启点；否则计算共享字母数量
   size_t shared = 0;
+  // 计算有多少个相同前缀
   if (counter_ < options_->block_restart_interval) {
     // See how much sharing to do with previous string
     const size_t min_length = std::min(last_key_piece.size(), key.size());
     while ((shared < min_length) && (last_key_piece[shared] == key[shared])) {
-      shared++;
+      shared++;  
     }
   } else {
     // Restart compression
     restarts_.push_back(buffer_.size());  // 满足16个，则建立一个restart point
     counter_ = 0;
   }
+
+  // 不相同的后缀个数
   const size_t non_shared = key.size() - shared;
 
   // 2. 格式： shared_len + non_shared_len + value_len + noshared_key + val

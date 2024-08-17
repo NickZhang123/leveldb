@@ -35,12 +35,12 @@ class BlockHandle {
   uint64_t size() const { return size_; }
   void set_size(uint64_t size) { size_ = size; }
 
-  void EncodeTo(std::string* dst) const;
-  Status DecodeFrom(Slice* input);
+  void EncodeTo(std::string* dst) const;    // 将offset和size编码两个64位可变长度的string
+  Status DecodeFrom(Slice* input);          // 对应编码函数，解码出offset和size
 
  private:
-  uint64_t offset_;
-  uint64_t size_;
+  uint64_t offset_;                         // 保存data_block在file中的offest
+  uint64_t size_;                           // 保存data_block在file中data长度（不包括footer）
 };
 
 // Footer encapsulates the fixed information stored at the tail

@@ -124,6 +124,7 @@ bool FilterBlockReader::KeyMayMatch(uint64_t block_offset, const Slice& key) {
   uint64_t index = block_offset >> base_lg_;
   if (index < num_) {
     // 2. start和limit为其offser index地址范围（limit为第二个offset，指定filter_data末尾）
+    // start中的数据是filter_data的起始位置，start+1即为filter_data的末尾位置
     uint32_t start = DecodeFixed32(offset_ + index * 4);
     uint32_t limit = DecodeFixed32(offset_ + index * 4 + 4);
 

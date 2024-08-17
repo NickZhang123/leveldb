@@ -81,8 +81,8 @@ class LEVELDB_EXPORT TableBuilder {
 
  private:
   bool ok() const { return status().ok(); }
-  void WriteBlock(BlockBuilder* block, BlockHandle* handle);
-  void WriteRawBlock(const Slice& data, CompressionType, BlockHandle* handle);
+  void WriteBlock(BlockBuilder* block, BlockHandle* handle);                      // 下盘data_block、filter_index、data_index
+  void WriteRawBlock(const Slice& data, CompressionType, BlockHandle* handle);    // 将data_block中的数据进行压缩后，加入footer，下盘
 
   struct Rep;
   Rep* rep_;
