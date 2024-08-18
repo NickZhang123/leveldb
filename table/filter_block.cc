@@ -20,11 +20,11 @@ FilterBlockBuilder::FilterBlockBuilder(const FilterPolicy* policy)
 
 // 生成filter block的中的filter data和filter offset array
 void FilterBlockBuilder::StartBlock(uint64_t block_offset) {
-  // 每2k生成一个bloom filter offset
+  // 每2k生成一个bloom filter offset， 计算offset中该有的元素数量
   uint64_t filter_index = (block_offset / kFilterBase);  // kFilterBase = 2K
   assert(filter_index >= filter_offsets_.size());
 
-  // 相当于每2k都有一个offset，但是filter data没有filter offset数量多（累计n个2k生成一个filter data时）
+  // 表示此时应该产生offset元素（可能生成，也可能是补充）
   while (filter_index > filter_offsets_.size()) {
     // 可能多次调用（block对应的第一个offset保存filter data的起始位置，后续offset保存filter data的结束位置）
     GenerateFilter();
@@ -66,7 +66,7 @@ void FilterBlockBuilder::GenerateFilter() {
   // 1. vector start_保存每次加入key的位置; 获取key个数
   const size_t num_keys = start_.size();  
 
-  // 2. 如果key数量为0，则对应的过滤器内容为上次过滤器末尾（这使得filter block中的filter data数量小于filter offset数量）
+  // 2. 如果key数量为0，则表示已经计算过内容，记录本次filter_data的结束位置
   if (num_keys == 0) {
     // Fast path if there are no keys for this filter
     filter_offsets_.push_back(result_.size());
@@ -85,7 +85,7 @@ void FilterBlockBuilder::GenerateFilter() {
     tmp_keys_[i] = Slice(base, length);
   }
 
-  // 4. 加入filter data前，先加入filter offset
+  // 4. 加入filter data前，先记录filter offset（本次filter_data的起始位置）
   // Generate filter for current set of keys and append to result_.
   filter_offsets_.push_back(result_.size());
 
@@ -97,6 +97,7 @@ void FilterBlockBuilder::GenerateFilter() {
   start_.clear();
 }
 
+// 读取sst中的filter_block并解析
 FilterBlockReader::FilterBlockReader(const FilterPolicy* policy,
                                      const Slice& contents)
     : policy_(policy), data_(nullptr), offset_(nullptr), num_(0), base_lg_(0) {

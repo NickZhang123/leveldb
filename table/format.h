@@ -40,7 +40,7 @@ class BlockHandle {
 
  private:
   uint64_t offset_;                         // 保存data_block在file中的offest
-  uint64_t size_;                           // 保存data_block在file中data长度（不包括footer）
+  uint64_t size_;                           // 保存data_block在file中data长度（不包括kBlockTrailerSize）
 };
 
 // Footer encapsulates the fixed information stored at the tail

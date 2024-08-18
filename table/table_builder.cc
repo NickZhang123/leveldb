@@ -37,17 +37,17 @@ struct TableBuilder::Rep {
 
   Options options;
   Options index_block_options;
-  WritableFile* file;   // sst对应的系统文件
-  uint64_t offset;      // sstable使用文件大小
+  WritableFile* file;         // sst对应的系统文件
+  uint64_t offset;            // sstable使用文件大小
   Status status;
-  BlockBuilder data_block;
-  BlockBuilder index_block;
+  BlockBuilder data_block;    // 构造data_block
+  BlockBuilder index_block;   // 构造data_index
 
-  std::string last_key; // 最后一次添加的key
-  int64_t num_entries;  // 添加的k-v数量
+  std::string last_key;       // 最后一次添加的key
+  int64_t num_entries;        // 添加的k-v数量
 
   bool closed;  // Either Finish() or Abandon() has been called.
-  FilterBlockBuilder* filter_block;
+  FilterBlockBuilder* filter_block;   // 构造filter block
 
   // We do not emit the index entry for a block until we have seen the
   // first key for the next data block.  This allows us to use shorter
@@ -58,8 +58,8 @@ struct TableBuilder::Rep {
   // blocks.
   //
   // Invariant: r->pending_index_entry is true only if data_block is empty.
-  bool pending_index_entry;
-  BlockHandle pending_handle;  // Handle to add to index block; 记录每次下盘前的offset和size
+  bool pending_index_entry;     // 标志符，标志data_block下盘了，需要向data_index中添加一个kv实例
+  BlockHandle pending_handle;   // Handle to add to index block; 记录每次data_block下盘前的offset和size，转换为index_block实例
 
   std::string compressed_output;
 };
@@ -67,7 +67,7 @@ struct TableBuilder::Rep {
 TableBuilder::TableBuilder(const Options& options, WritableFile* file)
     : rep_(new Rep(options, file)) {
   if (rep_->filter_block != nullptr) {
-    rep_->filter_block->StartBlock(0);
+    rep_->filter_block->StartBlock(0);  // 指定file长度为0，构建filter_data
   }
 }
 
@@ -114,10 +114,10 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
 
   // 数据key写入filter_block
   if (r->filter_block != nullptr) {
-    r->filter_block->AddKey(key);   // 只计算key的特，每个key都记录
+    r->filter_block->AddKey(key);   // 记录key，用于生成filter_data
   }
 
-  // 保存最后一个key
+  // 保存data_block的最后一个key
   r->last_key.assign(key.data(), key.size());
   r->num_entries++;
 
@@ -131,6 +131,7 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   }
 }
 
+// 刷新一个data_block
 void TableBuilder::Flush() {
   Rep* r = rep_;
   assert(!r->closed);
@@ -152,7 +153,7 @@ void TableBuilder::Flush() {
   }
 }
 
-// 压缩后下盘
+// 追加重启点进buffer， 压缩data_block buffer，调用WriteRawBlock下盘，同时重置data_block
 void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   // File format contains a sequence of blocks where each block has:
   //    block_data: uint8[n]
@@ -161,7 +162,8 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   assert(ok());
   Rep* r = rep_;
 
-  Slice raw = block->Finish();    // 将重启点和重启点数量按照固定32位的格式追加到buffer_中
+  // 将重启点和重启点数量按照固定32位的格式追加到buffer_中
+  Slice raw = block->Finish();    
 
   Slice block_contents;
   CompressionType type = r->options.compression;
@@ -206,6 +208,7 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
 
   r->compressed_output.clear();
 
+  // 重置block
   block->Reset();
 }
 

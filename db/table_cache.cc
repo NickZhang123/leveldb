@@ -57,6 +57,7 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size, Cache::Ha
       }
     }
     if (s.ok()) {
+      // 读取sst，并解析data_index block， filter_data block
       s = Table::Open(options_, file, file_size, &table);
     }
 
@@ -69,6 +70,7 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size, Cache::Ha
       TableAndFile* tf = new TableAndFile;
       tf->file = file;
       tf->table = table;
+      // key为文件number，value为文件描述符，和文件中的data index, filter_data数据
       *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
     }
   }
@@ -84,6 +86,7 @@ Iterator* TableCache::NewIterator(const ReadOptions& options,
   }
 
   Cache::Handle* handle = nullptr;
+  // 读取文件，并将文件纳入缓存管理
   Status s = FindTable(file_number, file_size, &handle);
   if (!s.ok()) {
     return NewErrorIterator(s);

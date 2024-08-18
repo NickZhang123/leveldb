@@ -13,6 +13,8 @@
 
 namespace leveldb {
 
+
+// 将offset和len逐字节输出
 void BlockHandle::EncodeTo(std::string* dst) const {
   // Sanity check that all fields have been set
   assert(offset_ != ~static_cast<uint64_t>(0));
@@ -21,6 +23,7 @@ void BlockHandle::EncodeTo(std::string* dst) const {
   PutVarint64(dst, size_);
 }
 
+// 解析offset和len
 Status BlockHandle::DecodeFrom(Slice* input) {
   if (GetVarint64(input, &offset_) && GetVarint64(input, &size_)) {
     return Status::OK();
@@ -29,6 +32,7 @@ Status BlockHandle::DecodeFrom(Slice* input) {
   }
 }
 
+// 编码sst footer，固定48个字节
 void Footer::EncodeTo(std::string* dst) const {
   const size_t original_size = dst->size();
   metaindex_handle_.EncodeTo(dst);
@@ -40,6 +44,7 @@ void Footer::EncodeTo(std::string* dst) const {
   (void)original_size;  // Disable unused variable warning.
 }
 
+// 解析sst footer
 Status Footer::DecodeFrom(Slice* input) {
   if (input->size() < kEncodedLength) {
     return Status::Corruption("not an sstable (footer too short)");
@@ -66,7 +71,8 @@ Status Footer::DecodeFrom(Slice* input) {
   return result;
 }
 
-// 读取sst，去掉tailer数据
+// 读取block数据(解析尾部数据的crc和压缩类型type，进行crc校验和解压，返回解压内容)
+// data和filter_data都是通过这个接口读取
 Status ReadBlock(RandomAccessFile* file, const ReadOptions& options,
                  const BlockHandle& handle, BlockContents* result) {
   result->data = Slice();
@@ -78,6 +84,8 @@ Status ReadBlock(RandomAccessFile* file, const ReadOptions& options,
   size_t n = static_cast<size_t>(handle.size());
   char* buf = new char[n + kBlockTrailerSize];
   Slice contents;
+
+  // 读取整个block块，包括tailer
   Status s = file->Read(handle.offset(), n + kBlockTrailerSize, &contents, buf);
   if (!s.ok()) {
     delete[] buf;
@@ -100,6 +108,7 @@ Status ReadBlock(RandomAccessFile* file, const ReadOptions& options,
     }
   }
 
+  // 解压获取原始数据
   switch (data[n]) {
     case kNoCompression:
       if (data != buf) {

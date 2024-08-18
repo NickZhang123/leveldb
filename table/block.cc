@@ -34,6 +34,7 @@ Block::Block(const BlockContents& contents)
       // The size is too small for NumRestarts()
       size_ = 0;
     } else {
+      // 计算data_block中offset起始位置
       restart_offset_ = size_ - (1 + NumRestarts()) * sizeof(uint32_t);
     }
   }
@@ -74,8 +75,9 @@ static inline const char* DecodeEntry(const char* p, const char* limit,
   return p;
 }
 
+// block格式：entry... + restart point arr + arr_len + type + CRC
 class Block::Iter : public Iterator {
- private:  // block格式：entry... + restart point arr + arr_len + type + CRC
+ private:  
   const Comparator* const comparator_;
   const char* const data_;       // underlying block contents                     block内容
   uint32_t const restarts_;      // Offset of restart array (list of fixed32)    重启点数组offset
@@ -104,7 +106,7 @@ class Block::Iter : public Iterator {
     return DecodeFixed32(data_ + restarts_ + index * sizeof(uint32_t));
   }
 
-  // 转到index对应的value位置
+  // 转到index重启点对应的value位置
   void SeekToRestartPoint(uint32_t index) {
     key_.clear();
     restart_index_ = index;
@@ -127,6 +129,7 @@ class Block::Iter : public Iterator {
   }
 
   bool Valid() const override { return current_ < restarts_; }  // entry在offset数组前
+
   Status status() const override { return status_; }
   Slice key() const override {
     assert(Valid());
@@ -163,6 +166,7 @@ class Block::Iter : public Iterator {
     } while (ParseNextKey() && NextEntryOffset() < original);
   }
 
+  // 二分法快速定位附近重启点，顺序查找精确定位某个entry
   void Seek(const Slice& target) override {
     // Binary search in restart array to find the last restart point
     // with a key < target
@@ -186,6 +190,7 @@ class Block::Iter : public Iterator {
       }
     }
 
+    // 二分法
     while (left < right) {
       uint32_t mid = (left + right + 1) / 2;
       uint32_t region_offset = GetRestartPoint(mid);
@@ -197,6 +202,8 @@ class Block::Iter : public Iterator {
         CorruptionError();
         return;
       }
+
+      // 获取到重启点mid中的第一个kv的key，即对应哪个data_block的last_key
       Slice mid_key(key_ptr, non_shared);
       if (Compare(mid_key, target) < 0) {
         // Key at "mid" is smaller than "target".  Therefore all
@@ -204,8 +211,8 @@ class Block::Iter : public Iterator {
         left = mid;
       } else {
         // Key at "mid" is >= "target".  Therefore all blocks at or
-        // after "mid" are uninteresting.
-        right = mid - 1;
+        // after "mid" are uninteresting.  // ? 这个block的最后一个key大于目标值，可能其他key==目标值
+        right = mid - 1;  
       }
     }
 
@@ -217,12 +224,16 @@ class Block::Iter : public Iterator {
     if (!skip_seek) {
       SeekToRestartPoint(left);
     }
+
+    // 顺序查找
     // Linear search (within restart block) for first key >= target
     while (true) {
       if (!ParseNextKey()) {
         return;
       }
-      if (Compare(key_, target) >= 0) {
+      // 找到第一个大于等于target的key，即第一个data_block last_key大于target的data_block
+      // 此时找到可能包含target的data block
+      if (Compare(key_, target) >= 0) {  
         return;
       }
     }
@@ -249,9 +260,11 @@ class Block::Iter : public Iterator {
     value_.clear();
   }
 
+  // 解析下一个entry
   bool ParseNextKey() {
     current_ = NextEntryOffset();
     const char* p = data_ + current_;
+    // restarts_表示重启点数组的起始偏移位置，即kv数据的结束位置
     const char* limit = data_ + restarts_;  // Restarts come right after data
     if (p >= limit) {
       // No more entries to return.  Mark as invalid.
@@ -272,7 +285,7 @@ class Block::Iter : public Iterator {
       value_ = Slice(p + non_shared, value_length);  // 解析value
       while (restart_index_ + 1 < num_restarts_ &&
              GetRestartPoint(restart_index_ + 1) < current_) {
-        ++restart_index_;
+        ++restart_index_;         // 切换一组重启点
       }
       return true;
     }

@@ -26,15 +26,16 @@ struct Table::Rep {
 
   Options options;
   Status status;
-  RandomAccessFile* file;
+  RandomAccessFile* file;       // sst文件的句柄
   uint64_t cache_id;
-  FilterBlockReader* filter;   // filter_block
-  const char* filter_data;
+  FilterBlockReader* filter;    // 管理filter_block的data，以及解析出来的offset数组
+  const char* filter_data;      // filter_block中的filter_data， 过滤器数据
 
   BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
-  Block* index_block; 
+  Block* index_block;           // data_index， data_block的元数据
 };
 
+// 读取sst文件，解析footer，data_index， filter_data数据
 Status Table::Open(const Options& options, RandomAccessFile* file,
                    uint64_t size, Table** table) {
   *table = nullptr;
@@ -42,12 +43,14 @@ Status Table::Open(const Options& options, RandomAccessFile* file,
     return Status::Corruption("file is too short to be an sstable");
   }
 
+  // 读取footer
   char footer_space[Footer::kEncodedLength];
   Slice footer_input;
   Status s = file->Read(size - Footer::kEncodedLength, Footer::kEncodedLength,
                         &footer_input, footer_space);
   if (!s.ok()) return s;
 
+  // 解析footer
   Footer footer;
   s = footer.DecodeFrom(&footer_input);
   if (!s.ok()) return s;
@@ -58,6 +61,7 @@ Status Table::Open(const Options& options, RandomAccessFile* file,
   if (options.paranoid_checks) {
     opt.verify_checksums = true;
   }
+  // 读取data_index内容并解压，保存在index_block_contents
   s = ReadBlock(file, opt, footer.index_handle(), &index_block_contents);
 
   if (s.ok()) {
@@ -90,6 +94,8 @@ void Table::ReadMeta(const Footer& footer) {
   if (rep_->options.paranoid_checks) {
     opt.verify_checksums = true;
   }
+  
+  // 读取filter_index
   BlockContents contents;
   if (!ReadBlock(rep_->file, opt, footer.metaindex_handle(), &contents).ok()) {
     // Do not propagate errors since meta info is not needed for operation
@@ -102,12 +108,14 @@ void Table::ReadMeta(const Footer& footer) {
   key.append(rep_->options.filter_policy->Name());
   iter->Seek(key);
   if (iter->Valid() && iter->key() == Slice(key)) {
+    // 读取filter_block
     ReadFilter(iter->value());
   }
   delete iter;
   delete meta;
 }
 
+// 读取filter_block
 void Table::ReadFilter(const Slice& filter_handle_value) {
   Slice v = filter_handle_value;
   BlockHandle filter_handle;
@@ -121,6 +129,8 @@ void Table::ReadFilter(const Slice& filter_handle_value) {
   if (rep_->options.paranoid_checks) {
     opt.verify_checksums = true;
   }
+
+  // 这里读取到filter_data的block
   BlockContents block;
   if (!ReadBlock(rep_->file, opt, filter_handle, &block).ok()) {
     return;
@@ -159,12 +169,13 @@ Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
 
   BlockHandle handle;
   Slice input = index_value;
-  Status s = handle.DecodeFrom(&input);
+  Status s = handle.DecodeFrom(&input); // 解析offset+len
   // We intentionally allow extra stuff in index_value so that we
   // can add more features in the future.
 
   if (s.ok()) {
     BlockContents contents;
+    // 尝试从cache中查找
     if (block_cache != nullptr) {
       char cache_key_buffer[16];
       EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
@@ -174,6 +185,7 @@ Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
       if (cache_handle != nullptr) {
         block = reinterpret_cast<Block*>(block_cache->Value(cache_handle));
       } else {
+        // 缓存中找不到，读取磁盘数据
         s = ReadBlock(table->rep_->file, options, handle, &contents);
         if (s.ok()) {
           block = new Block(contents);
@@ -183,6 +195,7 @@ Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
         }
       }
     } else {
+      // 没有缓存，从磁盘查找
       s = ReadBlock(table->rep_->file, options, handle, &contents);
       if (s.ok()) {
         block = new Block(contents);
@@ -190,6 +203,7 @@ Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
     }
   }
 
+  // 构建data_block迭代器并返回迭代器
   Iterator* iter;
   if (block != nullptr) {
     iter = block->NewIterator(table->rep_->options.comparator);
@@ -215,16 +229,19 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
                                                 const Slice&)) {
   Status s;
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
+  // 先用二分法，然后顺序查找，找到第一个大于等于key的kv（每个kv代表一个data_block）
   iiter->Seek(k);
   if (iiter->Valid()) {
-    Slice handle_value = iiter->value();
+    Slice handle_value = iiter->value();        // value为data_block的offset+len
     FilterBlockReader* filter = rep_->filter;
     BlockHandle handle;
     if (filter != nullptr && handle.DecodeFrom(&handle_value).ok() &&
-        !filter->KeyMayMatch(handle.offset(), k)) {
+        !filter->KeyMayMatch(handle.offset(), k)) {   // 对比布隆过滤器数据，不匹配则返回无数据
       // Not found
     } else {
+      // 布隆匹配后，进一步查找block_data中是否有指定key
       Iterator* block_iter = BlockReader(this, options, iiter->value());
+      // 使用二分法+顺序查找，找到第一个大于等于目标值的key
       block_iter->Seek(k);
       if (block_iter->Valid()) {
         (*handle_result)(arg, block_iter->key(), block_iter->value());
@@ -240,6 +257,7 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
   return s;
 }
 
+// 获取指定key所在的block的offset
 uint64_t Table::ApproximateOffsetOf(const Slice& key) const {
   Iterator* index_iter =
       rep_->index_block->NewIterator(rep_->options.comparator);
