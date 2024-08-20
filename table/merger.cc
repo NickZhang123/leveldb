@@ -145,6 +145,7 @@ class MergingIterator : public Iterator {
   Direction direction_;
 };
 
+// 遍历所有迭代器，选择一个最小值
 void MergingIterator::FindSmallest() {
   IteratorWrapper* smallest = nullptr;
   for (int i = 0; i < n_; i++) {

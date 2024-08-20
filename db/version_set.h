@@ -78,7 +78,7 @@ class Version {
   // Adds "stats" into the current state.  Returns true if a new
   // compaction may need to be triggered, false otherwise.
   // REQUIRES: lock is held
-  bool UpdateStats(const GetStats& stats);
+  bool UpdateStats(const GetStats& stats);   // 更新某个file的seek miss数
 
   // Record a sample of bytes read at the specified internal key.
   // Samples are taken approximately once every config::kReadBytesPeriod
@@ -91,7 +91,8 @@ class Version {
   void Ref();
   void Unref();
 
-  void GetOverlappingInputs(
+  
+  void GetOverlappingInputs(     // 匹配与[begin, end]重叠的sst
       int level,
       const InternalKey* begin,  // nullptr means before all keys
       const InternalKey* end,    // nullptr means after all keys
@@ -104,6 +105,7 @@ class Version {
   bool OverlapInLevel(int level, const Slice* smallest_user_key,
                       const Slice* largest_user_key);
 
+  // 为immutable dump选择层高(系统初期可能会直接dump到L2、L1，后期一般是dump到L0)
   // Return the level at which we should place a new memtable compaction
   // result that covers the range [smallest_user_key,largest_user_key].
   int PickLevelForMemTableOutput(const Slice& smallest_user_key,
@@ -142,6 +144,7 @@ class Version {
   // false, makes no more calls.
   //
   // REQUIRES: user portion of internal_key == user_key.
+  // 从每一层搜索指定key
   void ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
                           bool (*func)(void*, int, FileMetaData*));
 
@@ -156,14 +159,14 @@ class Version {
   std::vector<FileMetaData*> files_[config::kNumLevels]; // kNumLevels = 7
 
   // Next file to compact based on seek stats.
-  FileMetaData* file_to_compact_;  // seek到一定次数后需要compaction的file
+  FileMetaData* file_to_compact_;  // seek到一定次数后需要compaction的file（初始化在版本版本生成过程中计算）
   int file_to_compact_level_;      // 上述file对应的level
 
   // Level that should be compacted next and its compaction score.
   // Score < 1 means compaction is not strictly needed.  These fields
   // are initialized by Finalize().
-  double compaction_score_;   // >=1可触发size compaction
-  int compaction_level_;      // 得分最大的level,该层触发compcation
+  double compaction_score_;       // >=1可触发size compaction（在版本版本生成过程中计算）
+  int compaction_level_;          // 得分最大的level,该层触发compcation
 };
 
 class VersionSet {
@@ -180,6 +183,7 @@ class VersionSet {
   // current version.  Will release *mu while actually writing to the file.
   // REQUIRES: *mu is held on entry.
   // REQUIRES: no other thread concurrently calls LogAndApply()
+  // 产生新的version
   Status LogAndApply(VersionEdit* edit, port::Mutex* mu)
       EXCLUSIVE_LOCKS_REQUIRED(mu);
 
@@ -300,15 +304,15 @@ class VersionSet {
   const Options* const options_;
   TableCache* const table_cache_;
   const InternalKeyComparator icmp_;
-  uint64_t next_file_number_;       // SST文件编号分配管理
+  uint64_t next_file_number_;       // SST、log文件编号分配管理
   uint64_t manifest_file_number_;   // 
-  uint64_t last_sequence_;    // 上次使用的seq
-  uint64_t log_number_;
-  uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
+  uint64_t last_sequence_;          // 上次使用的seq（每次DbImpl put writeBatch后，更新这个值）
+  uint64_t log_number_;             // memtable dump时对应的log file number
+  uint64_t prev_log_number_;        // 0 or backing store for memtable being compacted
 
   // Opened lazily
-  WritableFile* descriptor_file_;  // manifest文件
-  log::Writer* descriptor_log_;  
+  WritableFile* descriptor_file_;   // manifest文件句柄
+  log::Writer* descriptor_log_;     // manifest文件写句柄
   Version dummy_versions_;  // Head of circular doubly-linked list of versions.
   Version* current_;        // == dummy_versions_.prev_
 
@@ -365,18 +369,18 @@ class Compaction {
 
   Compaction(const Options* options, int level);
 
-  int level_;  // 触发compcation的上层
+  int level_;                         // 触发compcation的上层
   uint64_t max_output_file_size_;
-  Version* input_version_;  // compaction前版本
-  VersionEdit edit_;
+  Version* input_version_;            // compaction前版本
+  VersionEdit edit_;                  // 本次合并出现的文件修改，版本修改
 
   // Each compaction reads inputs from "level_" and "level_+1"
-  // 保存两层参与compcation的file
-  std::vector<FileMetaData*> inputs_[2];  // The two sets of inputs
+  std::vector<FileMetaData*> inputs_[2];      // 保存两层参与compcation的file
 
   // State used to check for number of overlapping grandparent files
   // (parent == level_ + 1, grandparent == level_ + 2)
   std::vector<FileMetaData*> grandparents_;  // 保存level+2的重叠sst
+
   size_t grandparent_index_;  // Index in grandparent_starts_
   bool seen_key_;             // Some output key has been seen
   int64_t overlapped_bytes_;  // Bytes of overlap between current output

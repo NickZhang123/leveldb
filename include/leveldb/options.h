@@ -139,7 +139,7 @@ struct LEVELDB_EXPORT Options {
   // when a database is opened.  This can significantly speed up open.
   //
   // Default: currently false, but may become true later.
-  bool reuse_logs = false;
+  bool reuse_logs = false;    // 重用无需新生成manifest文件
 
   // If non-null, use the specified filter policy to reduce disk reads.
   // Many applications will benefit from passing the result of

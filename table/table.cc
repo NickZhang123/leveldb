@@ -241,7 +241,7 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
     } else {
       // 布隆匹配后，进一步查找block_data中是否有指定key
       Iterator* block_iter = BlockReader(this, options, iiter->value());
-      // 使用二分法+顺序查找，找到第一个大于等于目标值的key
+      // 使用二分法+顺序查找，找到第一个大于等于目标值的key(从data_block中查找，每个kv为真实kv)
       block_iter->Seek(k);
       if (block_iter->Valid()) {
         (*handle_result)(arg, block_iter->key(), block_iter->value());

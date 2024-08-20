@@ -44,8 +44,9 @@ class DBImpl : public DB {
              std::string* value) override;
              
   Iterator* NewIterator(const ReadOptions&) override;
-  const Snapshot* GetSnapshot() override;
-  void ReleaseSnapshot(const Snapshot* snapshot) override;
+  const Snapshot* GetSnapshot() override;                   // 创建一个快照
+  void ReleaseSnapshot(const Snapshot* snapshot) override;  // 释放快照
+  
   bool GetProperty(const Slice& property, std::string* value) override;
   void GetApproximateSizes(const Range* range, int n, uint64_t* sizes) override;
   void CompactRange(const Slice* begin, const Slice* end) override;
@@ -91,15 +92,16 @@ class DBImpl : public DB {
   struct CompactionStats {
     CompactionStats() : micros(0), bytes_read(0), bytes_written(0) {}
 
+    // 累加统计
     void Add(const CompactionStats& c) {
       this->micros += c.micros;
       this->bytes_read += c.bytes_read;
       this->bytes_written += c.bytes_written;
     }
 
-    int64_t micros;
-    int64_t bytes_read;
-    int64_t bytes_written;
+    int64_t micros;         // 合并过程总耗时
+    int64_t bytes_read;     // 参与合并的总大小
+    int64_t bytes_written;  // 合并输出的总大小
   };
 
   Iterator* NewInternalIterator(const ReadOptions&,
@@ -189,6 +191,7 @@ class DBImpl : public DB {
   std::deque<Writer*> writers_ GUARDED_BY(mutex_);
   WriteBatch* tmp_batch_ GUARDED_BY(mutex_);
 
+  // snapshot通过双向链表管理； 做compaction时使用
   SnapshotList snapshots_ GUARDED_BY(mutex_);
 
   // Set of table files to protect from deletion because they are
@@ -205,8 +208,8 @@ class DBImpl : public DB {
   // Have we encountered a background error in paranoid mode?
   Status bg_error_ GUARDED_BY(mutex_);
 
-  CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
-};
+  CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);    // 每个层级合并操作的累计统计，包括耗时、输入输出大小
+};  
 
 // Sanitize db options.  The caller should delete result.info_log if
 // it is not equal to src.info_log.

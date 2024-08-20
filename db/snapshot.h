@@ -54,6 +54,7 @@ class SnapshotList {
   }
 
   // Creates a SnapshotImpl and appends it to the end of the list.
+  // 创建一个快照，保存快照seq，加入快照链表
   SnapshotImpl* New(SequenceNumber sequence_number) {
     assert(empty() || newest()->sequence_number_ <= sequence_number);
 
@@ -87,7 +88,7 @@ class SnapshotList {
 
  private:
   // Dummy head of doubly-linked list of snapshots
-  SnapshotImpl head_;
+  SnapshotImpl head_;  // 链表头
 };
 
 }  // namespace leveldb

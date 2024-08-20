@@ -37,6 +37,7 @@ TableCache::TableCache(const std::string& dbname, const Options& options, int en
 
 TableCache::~TableCache() { delete cache_; }
 
+// 从缓存中获取sst文件信息，如果缓存不存在，则从磁盘读取sst并解析数据后加入缓存
 Status TableCache::FindTable(uint64_t file_number, uint64_t file_size, Cache::Handle** handle) {
   Status s;
   char buf[sizeof(file_number)];
@@ -106,9 +107,11 @@ Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
                        void (*handle_result)(void*, const Slice&,
                                              const Slice&)) {
   Cache::Handle* handle = nullptr;
+  // 从缓存中找到table cache
   Status s = FindTable(file_number, file_size, &handle);
   if (s.ok()) {
     Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+    // 从sst中找对应key
     s = t->InternalGet(options, k, arg, handle_result);
     cache_->Release(handle);
   }
